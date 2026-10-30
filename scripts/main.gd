@@ -13,6 +13,8 @@ const FIZZLED := Color(1, 0.5, 0.5, 0.6)
 
 @onready var board: Board = %Board
 @onready var hud_label: Label = %HudLabel
+@onready var draw_pile_button: Button = %DrawPileButton
+@onready var discard_button: Button = %DiscardButton
 @onready var slot_row: HBoxContainer = %SlotRow
 @onready var effects_label: Label = %EffectsLabel
 @onready var hand_box: HBoxContainer = %Hand
@@ -23,6 +25,7 @@ const FIZZLED := Color(1, 0.5, 0.5, 0.6)
 @onready var new_round_button: Button = %NewRoundButton
 
 var deck := Deck.new()
+var pile_viewer := PileViewer.new()
 var slots: Array[CardSlot] = []
 var turn := 1
 var busy := false
@@ -46,6 +49,9 @@ func _ready() -> void:
 	hand_box.set_drag_forwarding(Callable(), _can_drop_on_hand, _drop_on_hand)
 	lock_in_button.pressed.connect(lock_in)
 	new_round_button.pressed.connect(new_round)
+	draw_pile_button.pressed.connect(_view_pile.bind("Draw pile", deck.draw_pile))
+	discard_button.pressed.connect(_view_pile.bind("Discard", deck.discard_pile))
+	add_child(pile_viewer)
 	var bug_report := BugReport.new()
 	bug_report.get_state = _bug_report_state
 	add_child(bug_report)
@@ -64,6 +70,7 @@ func new_round() -> void:
 	BugReport.note("New round: mouse %s, cheese %s" % [mouse, cheese])
 	turn = 1
 	win_panel.hide()
+	pile_viewer.hide()
 	start_turn()
 
 
@@ -90,6 +97,8 @@ func lock_in() -> void:
 		return
 	busy = true
 	lock_in_button.disabled = true
+	draw_pile_button.disabled = true
+	discard_button.disabled = true
 	status_label.text = "Moving..."
 	for card in _all_cards():
 		card.disabled = true
@@ -149,6 +158,8 @@ func lock_in() -> void:
 	deck.discard(played)
 	busy = false
 	lock_in_button.disabled = false
+	draw_pile_button.disabled = false
+	discard_button.disabled = false
 
 	if reached:
 		BugReport.note("Found the cheese on turn %d" % turn)
@@ -313,8 +324,14 @@ func _clear_cards() -> void:
 
 
 func _refresh_hud() -> void:
-	hud_label.text = "Turn %d     Draw pile: %d     Discard: %d" % [
-		turn, deck.draw_pile.size(), deck.discard_pile.size()]
+	hud_label.text = "Turn %d" % turn
+	draw_pile_button.text = "Draw pile: %d" % deck.draw_pile.size()
+	discard_button.text = "Discard: %d" % deck.discard_pile.size()
+
+
+func _view_pile(title: String, dirs: Array[int]) -> void:
+	BugReport.note("Viewed %s" % title.to_lower())
+	pile_viewer.show_pile(title, dirs)
 
 
 ## Snapshot of the round for an F12 bug report.

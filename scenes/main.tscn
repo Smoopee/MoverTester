@@ -69,10 +69,30 @@ layout_mode = 2
 theme_override_font_sizes/font_size = 30
 text = "Mouse & Cheese"
 
-[node name="HudLabel" type="Label" parent="Margin/Layout/Side"]
+[node name="Hud" type="HBoxContainer" parent="Margin/Layout/Side"]
+layout_mode = 2
+theme_override_constants/separation = 16
+
+[node name="HudLabel" type="Label" parent="Margin/Layout/Side/Hud"]
 unique_name_in_owner = true
 layout_mode = 2
 text = "Turn 1"
+
+[node name="DrawPileButton" type="Button" parent="Margin/Layout/Side/Hud"]
+unique_name_in_owner = true
+layout_mode = 2
+tooltip_text = "View the cards left in the draw pile"
+focus_mode = 0
+mouse_default_cursor_shape = 2
+text = "Draw pile: 0"
+
+[node name="DiscardButton" type="Button" parent="Margin/Layout/Side/Hud"]
+unique_name_in_owner = true
+layout_mode = 2
+tooltip_text = "View the cards in the discard pile"
+focus_mode = 0
+mouse_default_cursor_shape = 2
+text = "Discard: 0"
 
 [node name="SlotsTitle" type="Label" parent="Margin/Layout/Side"]
 layout_mode = 2
