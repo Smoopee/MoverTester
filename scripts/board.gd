@@ -4,6 +4,8 @@ extends Control
 
 ## The mouse picked up the crumb on this cell.
 signal crumb_collected(cell: Vector2i)
+## A cell was left-clicked. The F2 dev menu uses it to edit the board.
+signal cell_clicked(cell: Vector2i)
 
 const GRID := 20
 const CELL := 30
@@ -41,6 +43,8 @@ const CHEESE_STEP_TIME := 0.2
 
 ## When false, moves finish instantly instead of tweening (used by the headless balance sim).
 var animate := true
+## Dev menu cheat: when true, traps and cats can't catch the mouse.
+var invincible := false
 var mouse_cell := Vector2i.ZERO
 var cheese_cell := Vector2i.ZERO
 ## Cheese position in cell units; tweened between cells when RUNAWAY CHEESE moves it.
@@ -87,9 +91,17 @@ func place(mouse: Vector2i, cheese: Vector2i, trap_cells: Array[Vector2i] = [],
 	if king and not cats.is_empty():
 		cats[0].hunter = true
 		cats[0].steps = Boss.KING_STEPS
-	_plan_cats()
+	plan_cats()
 	facing = Card.Dir.UP
 	mouse_pos = Vector2(mouse)
+
+
+func _gui_input(event: InputEvent) -> void:
+	var click := event as InputEventMouseButton
+	if click and click.pressed and click.button_index == MOUSE_BUTTON_LEFT:
+		var cell := Vector2i((click.position / CELL).floor())
+		if _in_bounds(cell):
+			cell_clicked.emit(cell)
 
 
 func remove_trap(cell: Vector2i) -> void:
@@ -120,7 +132,7 @@ func move_cats() -> void:
 		if cat.path:
 			cat.cell = cat.path.back()
 		cat.pos = Vector2(cat.cell)
-	_plan_cats()
+	plan_cats()
 	queue_redraw()
 
 
@@ -205,12 +217,12 @@ func is_caught() -> bool:
 
 ## True when the mouse is on a trap cell.
 func is_trapped() -> bool:
-	return mouse_cell in traps
+	return mouse_cell in traps and not invincible
 
 
 ## True when the mouse is on a cat or its path.
 func caught_by_cat() -> bool:
-	return _cat_at(mouse_cell) != null
+	return _cat_at(mouse_cell) != null and not invincible
 
 
 ## True when moving onto the cell would catch the mouse: a trap, a cat or a cat's path.
@@ -235,7 +247,7 @@ func _finish(tween: Tween, passed: Array[Vector2i] = []) -> bool:
 			queue_redraw()
 			crumb_collected.emit(cell)
 	var cat := _cat_at(mouse_cell)
-	if cat:
+	if cat and not invincible:
 		await _pounce(cat)
 	return mouse_cell == cheese_cell or is_caught()
 
@@ -261,7 +273,7 @@ func _pounce(cat: Cat) -> void:
 
 ## Gives each cat a new path, off the walls, traps, cheese, mouse and other cats. Hunters head for
 ## the mouse.
-func _plan_cats() -> void:
+func plan_cats() -> void:
 	for cat in cats:
 		cat.plan(func(cell: Vector2i) -> bool:
 			return not _in_bounds(cell) or cell in traps or cell == cheese_cell or cell == mouse_cell \

@@ -106,7 +106,7 @@ func _ready() -> void:
 	cancel.text = "Cancel"
 	cancel.custom_minimum_size = Vector2(120, 40)
 	cancel.size_flags_horizontal = Control.SIZE_SHRINK_END
-	cancel.pressed.connect(_close_picker)
+	cancel.pressed.connect(close_picker)
 	_picker.add_child(cancel)
 	vbox.add_child(_picker)
 
@@ -133,7 +133,7 @@ func open(run: Run, free_trinket := false) -> void:
 	_next_button.text = "Boss Round" if boss_next else "Next Round"
 	_fill_row(Kind.CONSUMABLE, Items.Consumable.values())
 	_fill_row(Kind.STAMP, Items.STAMPS.duplicate())
-	_close_picker()
+	close_picker()
 	BugReport.note("Shop opened with %d crumbs" % run.crumbs)
 	show()
 	# Takes keyboard focus from Lock In, so Space/Enter can't play a turn under the overlay.
@@ -243,6 +243,9 @@ func _buy(offer: Offer) -> void:
 		return
 	match offer.kind:
 		Kind.TRINKET:
+			# The dev menu can hand out a trinket that's on the shelf.
+			if _run.has(offer.id):
+				return
 			_run.trinkets.append(offer.id)
 			if _free_trinket:
 				for other in _offers:
@@ -263,7 +266,7 @@ func _sell(offer: Offer, detail: String) -> void:
 	_run.crumbs -= offer.price
 	offer.sold = true
 	BugReport.note("Bought %s for %d%s (%d crumbs left)" % [_info(offer)[0], offer.price, detail, _run.crumbs])
-	_refresh()
+	refresh()
 
 
 ## Swaps the offers for a grid of the deck's cards to put the stamp on. Nothing is paid until one is
@@ -291,19 +294,20 @@ func _apply_stamp(data: CardData) -> void:
 	var offer := _pending
 	var old := data.label()
 	data.stamp = offer.id as CardSlot.Effect
-	_close_picker()
+	close_picker()
 	_sell(offer, " on %s" % old)
 
 
-func _close_picker() -> void:
+func close_picker() -> void:
 	_pending = null
 	_picker.hide()
 	_sections.show()
 	_next_button.show()
-	_refresh()
+	refresh()
 
 
-func _refresh() -> void:
+## Updates the crumbs, the pouch count and the buy buttons. The dev menu calls it after changing the run.
+func refresh() -> void:
 	if _run == null:
 		return
 	_crumbs_label.text = "%d crumbs" % _run.crumbs
@@ -311,9 +315,10 @@ func _refresh() -> void:
 	_pouch_label.text = "Used once, then gone. Pouch %d/%d." % [_run.pouch.size(), Items.POUCH_SIZE]
 	for offer in _offers:
 		var blocked := offer.kind == Kind.CONSUMABLE and pouch_full
+		var owned := offer.kind == Kind.TRINKET and not offer.sold and _run.has(offer.id)
 		var buy := "Take" if offer.price == 0 else "Buy (%d)" % offer.price
-		offer.button.text = "Sold" if offer.sold else ("Pouch full" if blocked else buy)
-		offer.button.disabled = offer.sold or blocked or offer.price > _run.crumbs
+		offer.button.text = "Sold" if offer.sold else ("Owned" if owned else ("Pouch full" if blocked else buy))
+		offer.button.disabled = offer.sold or owned or blocked or offer.price > _run.crumbs
 
 
 func _on_next_round() -> void:
