@@ -7,8 +7,13 @@ signal crumb_collected(cell: Vector2i)
 ## A cell was left-clicked. The F2 dev menu uses it to edit the board.
 signal cell_clicked(cell: Vector2i)
 
-const GRID := 20
+## Cells along each side of the biggest board. Early rounds use a smaller one (see Difficulty.grid).
+const MAX_GRID := 20
+## Cell size in pixels on the biggest board. Smaller boards are drawn zoomed in, up to MAX_ZOOM.
 const CELL := 30
+## Width and height of the board area in pixels, whatever the grid size.
+const SIZE := MAX_GRID * CELL
+const MAX_ZOOM := 2.0
 const STEP_TIME := 0.25
 const SLIDE_CELL_TIME := 0.05
 const JUMP_TIME := 0.4
@@ -45,6 +50,14 @@ const CHEESE_STEP_TIME := 0.2
 var animate := true
 ## Dev menu cheat: when true, traps and cats can't catch the mouse.
 var invincible := false
+## Cells along each side of the board this round. Set it before placing anything.
+var grid := MAX_GRID:
+	set(value):
+		grid = value
+		var zoom := minf(float(MAX_GRID) / grid, MAX_ZOOM)
+		var origin := Vector2.ONE * (SIZE - grid * CELL * zoom) / 2.0
+		_view = Transform2D(0.0, Vector2.ONE * zoom, 0.0, origin)
+		queue_redraw()
 var mouse_cell := Vector2i.ZERO
 var cheese_cell := Vector2i.ZERO
 ## Cheese position in cell units; tweened between cells when RUNAWAY CHEESE moves it.
@@ -71,10 +84,13 @@ var hop := 0.0:
 		queue_redraw()
 ## True while the cats walk, so their old paths aren't drawn.
 var _cats_walking := false
+## Maps the grid, drawn with CELL-sized cells, onto the board area: zoomed in and centered when the
+## grid is small.
+var _view := Transform2D.IDENTITY
 
 
 func _ready() -> void:
-	custom_minimum_size = Vector2(GRID * CELL, GRID * CELL)
+	custom_minimum_size = Vector2(SIZE, SIZE)
 
 
 ## With king set, the first cat is the Alley King, a bigger cat that hunts the mouse.
@@ -99,7 +115,7 @@ func place(mouse: Vector2i, cheese: Vector2i, trap_cells: Array[Vector2i] = [],
 func _gui_input(event: InputEvent) -> void:
 	var click := event as InputEventMouseButton
 	if click and click.pressed and click.button_index == MOUSE_BUTTON_LEFT:
-		var cell := Vector2i((click.position / CELL).floor())
+		var cell := Vector2i((_view.affine_inverse() * click.position / CELL).floor())
 		if _in_bounds(cell):
 			cell_clicked.emit(cell)
 
@@ -173,7 +189,7 @@ func step(dir: Card.Dir, wrap := false) -> bool:
 		mouse_cell = target
 		tween.tween_property(self, "mouse_pos", Vector2(target), STEP_TIME)
 	elif wrap:
-		target = Vector2i(posmod(target.x, GRID), posmod(target.y, GRID))
+		target = Vector2i(posmod(target.x, grid), posmod(target.y, grid))
 		mouse_cell = target
 		tween.tween_property(self, "mouse_pos", mouse_pos + Vector2(offset) * 0.5, STEP_TIME / 2)
 		tween.tween_callback(func() -> void: mouse_pos = Vector2(target) - Vector2(offset) * 0.5)
@@ -203,7 +219,7 @@ func slide(dir: Card.Dir) -> bool:
 ## Hops the mouse by offset, passing over the cells in between. Lands as far as the walls allow.
 func jump(offset: Vector2i, dir: Card.Dir) -> bool:
 	facing = dir
-	mouse_cell = (mouse_cell + offset).clamp(Vector2i.ZERO, Vector2i(GRID - 1, GRID - 1))
+	mouse_cell = (mouse_cell + offset).clamp(Vector2i.ZERO, Vector2i(grid - 1, grid - 1))
 	var tween := create_tween().set_parallel()
 	tween.tween_property(self, "mouse_pos", Vector2(mouse_cell), JUMP_TIME)
 	tween.tween_method(func(t: float) -> void: hop = sin(t * PI) * HOP_HEIGHT, 0.0, 1.0, JUMP_TIME)
@@ -304,7 +320,7 @@ func _cat_at(cell: Vector2i) -> Cat:
 
 
 func _in_bounds(cell: Vector2i) -> bool:
-	return cell.x >= 0 and cell.y >= 0 and cell.x < GRID and cell.y < GRID
+	return cell.x >= 0 and cell.y >= 0 and cell.x < grid and cell.y < grid
 
 
 func _distance(a: Vector2i, b: Vector2i) -> int:
@@ -312,11 +328,12 @@ func _distance(a: Vector2i, b: Vector2i) -> int:
 
 
 func _draw() -> void:
-	for y in GRID:
-		for x in GRID:
+	draw_set_transform_matrix(_view)
+	for y in grid:
+		for x in grid:
 			var color := FLOOR_LIGHT if (x + y) % 2 == 0 else FLOOR_DARK
 			draw_rect(Rect2(x * CELL, y * CELL, CELL, CELL), color)
-	draw_rect(Rect2(0, 0, GRID * CELL, GRID * CELL), BORDER, false, 3.0)
+	draw_rect(Rect2(0, 0, grid * CELL, grid * CELL), BORDER, false, 3.0)
 	if not _cats_walking:
 		for cat in cats:
 			_draw_cat_path(cat)
@@ -402,7 +419,7 @@ func _offset(points: PackedVector2Array, by: Vector2) -> PackedVector2Array:
 
 ## Draws a top-down mouse facing up, rotated to the direction it last moved.
 func _draw_mouse(center: Vector2) -> void:
-	draw_set_transform(center, Card.ANGLES[facing])
+	draw_set_transform_matrix(_view * Transform2D(Card.ANGLES[facing], center))
 	var tail := PackedVector2Array([Vector2(0, 11), Vector2(3, 15), Vector2(-1, 18), Vector2(2, 21)])
 	draw_polyline(tail, PINK, 2.0, true)
 	draw_colored_polygon(_ellipse(Vector2(0, 3), Vector2(7.5, 10)), FUR)
@@ -413,7 +430,7 @@ func _draw_mouse(center: Vector2) -> void:
 	draw_circle(Vector2(0, -14), 1.8, PINK)
 	draw_circle(Vector2(-2.2, -9), 1.1, Color.BLACK)
 	draw_circle(Vector2(2.2, -9), 1.1, Color.BLACK)
-	draw_set_transform(Vector2.ZERO)
+	draw_set_transform_matrix(_view)
 
 
 ## Shades the cells a cat will walk this turn and draws an arrow along them.
@@ -440,7 +457,8 @@ func _draw_cat_path(cat: Cat) -> void:
 func _draw_cat(center: Vector2, cat_facing: Card.Dir, king := false) -> void:
 	var fur := KING_FUR if king else CAT_FUR
 	var stripe := KING_STRIPE if king else CAT_STRIPE
-	draw_set_transform(center, Card.ANGLES[cat_facing], Vector2.ONE * (KING_SCALE if king else 1.0))
+	draw_set_transform_matrix(_view * Transform2D(Card.ANGLES[cat_facing],
+		Vector2.ONE * (KING_SCALE if king else 1.0), 0.0, center))
 	draw_colored_polygon(_ellipse(Vector2(1.5, 5), Vector2(9, 11)), SHADOW)
 	var tail := PackedVector2Array([Vector2(0, 11), Vector2(5, 14), Vector2(5, 18), Vector2(1, 21)])
 	draw_polyline(tail, stripe, 4.0, true)
@@ -471,7 +489,7 @@ func _draw_cat(center: Vector2, cat_facing: Card.Dir, king := false) -> void:
 		draw_colored_polygon(crown, CROWN)
 		crown.append(crown[0])
 		draw_polyline(crown, CHEESE_HOLE, 1.0, true)
-	draw_set_transform(Vector2.ZERO)
+	draw_set_transform_matrix(_view)
 
 
 func _ellipse(center: Vector2, radii: Vector2, points := 20) -> PackedVector2Array:

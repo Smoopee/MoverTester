@@ -1,8 +1,7 @@
 class_name Boss
 extends RefCounted
 ## Boss rounds: every EVERY rounds, a round with a rule that makes it harder. The shop before one says
-## which boss is next. Beating a boss pays WIN_CRUMBS, gives a free trinket and makes later rounds
-## harder (more traps and cats).
+## which boss is next. Beating a boss pays WIN_CRUMBS and gives a free trinket.
 
 enum Kind { ALLEY_KING, RUNAWAY_CHEESE, KITCHEN_LIGHT }
 
@@ -12,24 +11,23 @@ const EVERY := 3
 const WIN_CRUMBS := 10
 ## Trinkets offered for free after a boss, of which the player takes one.
 const FREE_TRINKETS := 3
-## Traps added to every round for each boss beaten.
-const TRAPS_PER_BOSS := 1
-## A cat is added to every round for each this many bosses beaten, up to MAX_EXTRA_CATS.
-const BOSSES_PER_CAT := 2
-const MAX_EXTRA_CATS := 3
-## Cells the Alley King walks each turn.
+## Cells the Alley King walks each turn. It joins the round's usual cats.
 const KING_STEPS := 4
-## Cells the cheese runs each turn in RUNAWAY CHEESE.
+## Cells the cheese runs each turn in RUNAWAY CHEESE, and the extra turns that round gets to catch it.
 const CHEESE_STEPS := 1
-## Turns to reach the cheese in KITCHEN LIGHT.
-const KITCHEN_LIGHT_TURNS := 8
+const RUNAWAY_CHEESE_EXTRA_TURNS := 3
+## Turns KITCHEN LIGHT takes off the round's turn limit, which it won't cut below KITCHEN_LIGHT_MIN_TURNS.
+const KITCHEN_LIGHT_TURNS_CUT := 2
+const KITCHEN_LIGHT_MIN_TURNS := 3
 const COLOR := Color("e0584a")
 ## Name and description of each boss.
 const INFO := {
 	Kind.ALLEY_KING: ["THE ALLEY KING", "A big cat hunts the mouse, walking %d cells a turn toward it." % KING_STEPS],
-	Kind.RUNAWAY_CHEESE: ["RUNAWAY CHEESE", "The cheese runs %d cell a turn away from the mouse." % CHEESE_STEPS],
+	Kind.RUNAWAY_CHEESE: ["RUNAWAY CHEESE",
+		"The cheese runs %d cell a turn away from the mouse. " % CHEESE_STEPS
+			+ "You get %d extra turns to catch it." % RUNAWAY_CHEESE_EXTRA_TURNS],
 	Kind.KITCHEN_LIGHT: ["KITCHEN LIGHT",
-		"Reach the cheese within %d turns, or the light comes on and the run is over." % KITCHEN_LIGHT_TURNS],
+		"The light comes on early: %d fewer turns to reach the cheese." % KITCHEN_LIGHT_TURNS_CUT],
 }
 
 

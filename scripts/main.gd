@@ -4,12 +4,12 @@ extends Control
 
 const HAND_SIZE := 6
 const SLOT_COUNT := 4
+## The cheese starts at least this many cells from the mouse, or the board's size less 2 if that's smaller.
 const MIN_CHEESE_DISTANCE := 8
-const TRAP_COUNT := 8
 ## Crumbs scattered on the board each round, worth 1 each.
 const CRUMB_COUNT := 6
-const CAT_COUNT := 2
-## Cats start at least this many cells from the mouse.
+## Cats start at least this many cells from the mouse and each other, or half the board's size if
+## that's smaller.
 const CAT_MIN_DISTANCE := 6
 ## Chance that a slot gets an effect each turn.
 const EFFECT_CHANCE := 0.5
@@ -47,6 +47,8 @@ var pile_viewer := PileViewer.new()
 var shop := Shop.new()
 var slots: Array[CardSlot] = []
 var turn := 1
+## The last turn of this round. Not reaching the cheese by the end of it ends the run.
+var turn_limit := 1
 var busy := false
 var discards_left := DISCARDS_PER_ROUND
 ## Crumbs picked up on the board this round.
@@ -57,7 +59,7 @@ var trap_survived := false
 var recycled: Array[CardData] = []
 ## Direction of the last step this turn, for ECHO. -1 before the first one.
 var last_dir := -1
-## Set when KITCHEN LIGHT's turns run out, which ends the run like being caught.
+## Set when the round's turns run out, which ends the run like being caught.
 var out_of_time := false
 ## Set when the round ends, so dev menu edits to the board afterwards can't change the outcome.
 var run_over := false
@@ -119,16 +121,19 @@ func new_round() -> void:
 	elif bosses_enabled and Boss.is_boss_round(run.round_number):
 		run.boss = run.next_boss
 		run.next_boss = Boss.roll(run.boss)
+	board.grid = Difficulty.grid(run.round_number)
 	var mouse := _random_cell()
 	var cheese := _random_cell()
-	while _distance(mouse, cheese) < MIN_CHEESE_DISTANCE:
+	while _distance(mouse, cheese) < mini(MIN_CHEESE_DISTANCE, board.grid - 2):
 		cheese = _random_cell()
 	var traps := _place_traps(mouse, cheese)
 	var crumbs := _place_crumbs(mouse, cheese, traps)
 	var cats := _place_cats(mouse, cheese, traps)
 	board.place(mouse, cheese, traps, crumbs, cats, run.boss == Boss.Kind.ALLEY_KING)
-	BugReport.note("Round %d%s: mouse %s, cheese %s, traps %s, crumbs %s" % [run.round_number,
-		" (boss %s)" % Boss.INFO[run.boss][0] if run.boss != -1 else "", mouse, cheese, traps, crumbs])
+	turn_limit = _turn_limit(_distance(mouse, cheese))
+	BugReport.note("Round %d%s: %dx%d board, %d turns, mouse %s, cheese %s, traps %s, crumbs %s" % [
+		run.round_number, " (boss %s)" % Boss.INFO[run.boss][0] if run.boss != -1 else "", board.grid,
+		board.grid, turn_limit, mouse, cheese, traps, crumbs])
 	BugReport.note("Cats: %s" % _cat_paths())
 	turn = 1
 	out_of_time = false
@@ -157,8 +162,10 @@ func start_turn() -> void:
 	status_label.text = HINT
 	if run.boss != -1 and turn == 1:
 		status_label.text = "Boss round! %s" % HINT
-	elif run.boss == Boss.Kind.KITCHEN_LIGHT and turn == Boss.KITCHEN_LIGHT_TURNS:
+	elif turn == turn_limit and run.boss == Boss.Kind.KITCHEN_LIGHT:
 		status_label.text = "Last turn before the kitchen light comes on!"
+	elif turn == turn_limit:
+		status_label.text = "Last turn! Reach the cheese now, or the run is over."
 	_refresh_hud()
 	_refresh_pouch()
 
@@ -229,7 +236,7 @@ func lock_in() -> void:
 		status_label.text = "The cats prowl..."
 		await board.move_cats()
 		BugReport.note("Cats walked: %s" % _cat_paths())
-	if not ended and run.boss == Boss.Kind.KITCHEN_LIGHT and turn >= Boss.KITCHEN_LIGHT_TURNS:
+	if not ended and turn >= turn_limit:
 		out_of_time = true
 		ended = true
 
@@ -265,7 +272,8 @@ func _end_round() -> void:
 	run_over = board.is_caught() or out_of_time
 	if out_of_time:
 		BugReport.note("Out of time on turn %d of round %d" % [turn, run.round_number])
-		win_label.text = "Click! The kitchen light came on."
+		win_label.text = "Click! The kitchen light came on." if run.boss == Boss.Kind.KITCHEN_LIGHT \
+			else "Out of time! Someone put the cheese away."
 	elif board.is_caught():
 		var by_cat := board.caught_by_cat()
 		BugReport.note("Caught %s at %s on turn %d of round %d" % [
@@ -297,7 +305,7 @@ func _end_round() -> void:
 			run.bosses_beaten += 1
 			win_label.text = "You beat %s in %d turn%s!" % [Boss.INFO[run.boss][0], turn, "" if turn == 1 else "s"]
 			lines.append("Take a free trinket in the shop.")
-			lines.append("From now on, rounds have %d traps and %d cats." % [_trap_count(), _cat_count()])
+		lines.append("Next round: %s." % Difficulty.describe(run.round_number + 1))
 		win_details.text = "\n".join(lines)
 		win_panel_button.text = "Shop"
 	status_label.text = ""
@@ -315,7 +323,7 @@ func _on_win_panel_button() -> void:
 		shop.open(run, run.boss != -1)
 
 
-## True when the round ended the run: the mouse was caught, or KITCHEN LIGHT's turns ran out.
+## True when the round ended the run: the mouse was caught, or the turns ran out.
 func lost() -> bool:
 	return run_over
 
@@ -612,10 +620,7 @@ func _clear_cards() -> void:
 
 
 func _refresh_hud() -> void:
-	var turns := "Turn %d" % turn
-	if run.boss == Boss.Kind.KITCHEN_LIGHT:
-		turns += " of %d" % Boss.KITCHEN_LIGHT_TURNS
-	hud_label.text = "Round %d · %s · %d crumbs" % [run.round_number, turns, run.crumbs]
+	hud_label.text = "Round %d · Turn %d of %d · %d crumbs" % [run.round_number, turn, turn_limit, run.crumbs]
 	boss_label.visible = run.boss != -1
 	if run.boss != -1:
 		boss_label.text = "BOSS  %s" % Boss.describe(run.boss)
@@ -775,8 +780,8 @@ func _bug_report_state() -> String:
 			outcome = "  (won)"
 	elif shop.visible:
 		outcome = "  (shopping)"
-	lines.append("Round %d, turn %d%s%s, %d discards left" % [run.round_number, turn,
-		"  (moving)" if busy else "", outcome, discards_left])
+	lines.append("Round %d, turn %d of %d%s%s, %d discards left, %dx%d board" % [run.round_number, turn,
+		turn_limit, "  (moving)" if busy else "", outcome, discards_left, board.grid, board.grid])
 	lines.append("Boss: %s, next boss %s, %d beaten" % [Boss.INFO[run.boss][0] if run.boss != -1 else "-",
 		Boss.INFO[run.next_boss][0], run.bosses_beaten])
 	var trinket_names := PackedStringArray()
@@ -828,7 +833,7 @@ func _card_names(cards: Array[CardData]) -> String:
 
 
 func _random_cell() -> Vector2i:
-	return Vector2i(randi_range(0, Board.GRID - 1), randi_range(0, Board.GRID - 1))
+	return Vector2i(randi_range(0, board.grid - 1), randi_range(0, board.grid - 1))
 
 
 ## Picks trap cells off the cheese and not next to the mouse's start. No two traps touch, even
@@ -862,26 +867,37 @@ func _place_crumbs(mouse: Vector2i, cheese: Vector2i, traps: Array[Vector2i]) ->
 ## Picks cat cells off the cheese and the traps, well away from the mouse and spread out from each other.
 func _place_cats(mouse: Vector2i, cheese: Vector2i, traps: Array[Vector2i]) -> Array[Vector2i]:
 	var cats: Array[Vector2i] = []
+	var spacing := mini(CAT_MIN_DISTANCE, floori(board.grid / 2.0))
 	for attempt in 1000:
 		if cats.size() == _cat_count():
 			break
 		var cell := _random_cell()
-		if _distance(cell, mouse) < CAT_MIN_DISTANCE or cell == cheese or cell in traps:
+		if _distance(cell, mouse) < spacing or cell == cheese or cell in traps:
 			continue
-		if cats.any(func(cat: Vector2i) -> bool: return _distance(cell, cat) < CAT_MIN_DISTANCE):
+		if cats.any(func(cat: Vector2i) -> bool: return _distance(cell, cat) < spacing):
 			continue
 		cats.append(cell)
 	return cats
 
 
-## Traps each round: TRAP_COUNT, plus more for each boss beaten this run.
 func _trap_count() -> int:
-	return TRAP_COUNT + run.bosses_beaten * Boss.TRAPS_PER_BOSS
+	return Difficulty.traps(run.round_number)
 
 
-## Cats each round: CAT_COUNT, plus one for every Boss.BOSSES_PER_CAT bosses beaten this run.
+## This round's cats, plus the Alley King in its boss round.
 func _cat_count() -> int:
-	return CAT_COUNT + mini(floori(run.bosses_beaten / float(Boss.BOSSES_PER_CAT)), Boss.MAX_EXTRA_CATS)
+	return Difficulty.cats(run.round_number) + (1 if run.boss == Boss.Kind.ALLEY_KING else 0)
+
+
+## Turns to reach cheese distance cells away this round: fewer in KITCHEN LIGHT, more in RUNAWAY CHEESE.
+func _turn_limit(distance: int) -> int:
+	var limit := Difficulty.turn_limit(run.round_number, distance)
+	match run.boss:
+		Boss.Kind.KITCHEN_LIGHT:
+			limit = maxi(limit - Boss.KITCHEN_LIGHT_TURNS_CUT, Boss.KITCHEN_LIGHT_MIN_TURNS)
+		Boss.Kind.RUNAWAY_CHEESE:
+			limit += Boss.RUNAWAY_CHEESE_EXTRA_TURNS
+	return limit
 
 
 ## Each cat's cell and the path it will walk, for the bug report.
