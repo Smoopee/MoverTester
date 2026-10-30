@@ -10,6 +10,11 @@ var crumbs := 0
 var trinkets: Array[int] = []
 ## Held Items.Consumable values, at most Items.POUCH_SIZE.
 var pouch: Array[int] = []
+## This round's Boss.Kind, or -1 in a normal round.
+var boss := -1
+## The Boss.Kind of the next boss round, shown in the shop before it.
+var next_boss: Boss.Kind = Boss.roll()
+var bosses_beaten := 0
 
 
 func _init() -> void:

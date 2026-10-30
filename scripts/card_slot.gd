@@ -32,7 +32,7 @@ const INFO := {
 	Effect.GAMBLE: ["GAMBLE", "Moves 3 cells in a random direction.", DIRECTION_COLOR],
 	Effect.DOUBLE: ["DOUBLE", "Moves twice.", DISTANCE_COLOR],
 	Effect.LEAP: ["LEAP", "Jumps 2 cells, passing over the cell in between.", DISTANCE_COLOR],
-	Effect.SLIDE: ["SLIDE", "Keeps going until it hits a wall, a trap or the cheese.", DISTANCE_COLOR],
+	Effect.SLIDE: ["SLIDE", "Keeps going until it hits a wall, a trap, a cat's path or the cheese.", DISTANCE_COLOR],
 	Effect.WRAP: ["WRAP", "Going off an edge brings the mouse in on the opposite side.", DISTANCE_COLOR],
 	Effect.DIAGONAL: ["DIAGONAL", "Joins with the next card into one diagonal hop.", DISTANCE_COLOR],
 	Effect.ECHO: ["ECHO", "Repeats the previous move, then plays this card.", ORDER_COLOR],

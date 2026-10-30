@@ -27,9 +27,13 @@ var _run: Run
 var _offers: Array[Offer] = []
 ## The stamp offer whose card is being picked, or null.
 var _pending: Offer
+## After a boss: the trinkets on offer are free, and taking one takes the others off the shelf.
+var _free_trinket := false
 
 var _title := Label.new()
 var _crumbs_label := Label.new()
+var _boss_label := Label.new()
+var _trinket_hint := Label.new()
 var _sections := VBoxContainer.new()
 var _rows := {}
 var _pouch_label := Label.new()
@@ -80,9 +84,14 @@ func _ready() -> void:
 	header.add_child(_crumbs_label)
 	vbox.add_child(header)
 
+	_boss_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_boss_label.add_theme_color_override("font_color", Boss.COLOR)
+	_boss_label.add_theme_font_size_override("font_size", 16)
+	vbox.add_child(_boss_label)
+
 	_sections.add_theme_constant_override("separation", 12)
 	vbox.add_child(_sections)
-	_add_section(Kind.TRINKET, "Trinkets", "Yours for the rest of the run.")
+	_add_section(Kind.TRINKET, "Trinkets", "")
 	_add_section(Kind.CONSUMABLE, "Consumables", "")
 	_add_section(Kind.STAMP, "Card stamps", "Puts an effect on one card for good.")
 
@@ -109,12 +118,19 @@ func _ready() -> void:
 	vbox.add_child(_next_button)
 
 
-## Rolls this visit's offers and shows the shop.
-func open(run: Run) -> void:
+## Rolls this visit's offers and shows the shop. With free_trinket (after a boss), the trinket row
+## offers Boss.FREE_TRINKETS trinkets for free, to take one.
+func open(run: Run, free_trinket := false) -> void:
 	_run = run
 	_offers.clear()
+	_free_trinket = free_trinket
+	_trinket_hint.text = "Boss reward: take one for free." if free_trinket else "Yours for the rest of the run."
 	var trinkets: Array = Items.Trinket.values().filter(func(t: int) -> bool: return not run.has(t))
-	_fill_row(Kind.TRINKET, trinkets)
+	_fill_row(Kind.TRINKET, trinkets, Boss.FREE_TRINKETS if free_trinket else OFFERS_PER_ROW)
+	var boss_next := Boss.is_boss_round(run.round_number + 1)
+	_boss_label.visible = boss_next
+	_boss_label.text = "Next round is a boss. %s" % Boss.describe(run.next_boss)
+	_next_button.text = "Boss Round" if boss_next else "Next Round"
 	_fill_row(Kind.CONSUMABLE, Items.Consumable.values())
 	_fill_row(Kind.STAMP, Items.STAMPS.duplicate())
 	_close_picker()
@@ -133,7 +149,14 @@ func _add_section(kind: Kind, title: String, hint: String) -> void:
 	title_label.text = title
 	title_label.add_theme_font_size_override("font_size", 18)
 	labels.add_child(title_label)
-	var hint_label := _pouch_label if kind == Kind.CONSUMABLE else Label.new()
+	var hint_label: Label
+	match kind:
+		Kind.TRINKET:
+			hint_label = _trinket_hint
+		Kind.CONSUMABLE:
+			hint_label = _pouch_label
+		_:
+			hint_label = Label.new()
 	hint_label.text = hint
 	hint_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	hint_label.custom_minimum_size = Vector2(SECTION_WIDTH, 0)
@@ -148,18 +171,18 @@ func _add_section(kind: Kind, title: String, hint: String) -> void:
 	_sections.add_child(row)
 
 
-## Puts up to OFFERS_PER_ROW random picks from pool up for sale in the kind's row.
-func _fill_row(kind: Kind, pool: Array) -> void:
+## Puts up to count random picks from pool up for sale in the kind's row.
+func _fill_row(kind: Kind, pool: Array, count := OFFERS_PER_ROW) -> void:
 	var row: HBoxContainer = _rows[kind]
 	for child in row.get_children():
 		row.remove_child(child)
 		child.queue_free()
 	pool.shuffle()
-	for id: int in pool.slice(0, OFFERS_PER_ROW):
+	for id: int in pool.slice(0, count):
 		var offer := Offer.new()
 		offer.kind = kind
 		offer.id = id
-		offer.price = _info(offer)[2]
+		offer.price = 0 if kind == Kind.TRINKET and _free_trinket else _info(offer)[2]
 		_offers.append(offer)
 		row.add_child(_make_tile(offer))
 	if pool.is_empty():
@@ -221,6 +244,10 @@ func _buy(offer: Offer) -> void:
 	match offer.kind:
 		Kind.TRINKET:
 			_run.trinkets.append(offer.id)
+			if _free_trinket:
+				for other in _offers:
+					if other.kind == Kind.TRINKET and other != offer:
+						other.sold = true
 		Kind.CONSUMABLE:
 			if _run.pouch.size() >= Items.POUCH_SIZE:
 				return
@@ -284,7 +311,8 @@ func _refresh() -> void:
 	_pouch_label.text = "Used once, then gone. Pouch %d/%d." % [_run.pouch.size(), Items.POUCH_SIZE]
 	for offer in _offers:
 		var blocked := offer.kind == Kind.CONSUMABLE and pouch_full
-		offer.button.text = "Sold" if offer.sold else ("Pouch full" if blocked else "Buy (%d)" % offer.price)
+		var buy := "Take" if offer.price == 0 else "Buy (%d)" % offer.price
+		offer.button.text = "Sold" if offer.sold else ("Pouch full" if blocked else buy)
 		offer.button.disabled = offer.sold or blocked or offer.price > _run.crumbs
 
 

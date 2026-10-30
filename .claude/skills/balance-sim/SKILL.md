@@ -15,6 +15,9 @@ a greedy bot, so it always tests the current rules. 500 rounds take a few second
 - `--rounds N` (default 500); `--seed S` (default 1). The same seed gives the same output, so for a
   before/after comparison keep the seed and change one thing. Then check that the conclusion holds
   with 2–3 other seeds.
+- `--boss NAME` (`alley_king`, `runaway_cheese`, `kitchen_light`) makes every round that boss, each
+  on a fresh run. Without it boss rounds are off, so the default output is plain rounds only. Compare
+  a boss's caught / out-of-time rates against a plain run with the same seed.
 - Script errors print as `SCRIPT ERROR`. Fix them before reading any numbers.
 
 ## The bot

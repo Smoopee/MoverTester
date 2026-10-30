@@ -7,11 +7,20 @@ that changes how the card in that slot plays. Slot effects are where the game's 
 Each round also gives `DISCARDS_PER_ROUND` (5) discards: right-click a card, or drag it onto the
 Discard button, to swap it for a new draw (`main.gd` `discard_card`).
 
+The board has mouse traps and roaming **cats** (`CAT_COUNT`). Each cat shows the path it will walk
+this turn; moving onto a cat or its path catches the mouse. After the mouse moves, the cats walk
+their paths and plan new ones, which never cover the mouse's cell, the cheese or a trap.
+
 Rounds chain into an endless **run**: the deck, crumbs, trinkets and pouch carry over until a trap
-catches the mouse, which starts a new run. A won round pays crumbs (`WIN_CRUMBS` + unused discards, plus
+or a cat catches the mouse, which starts a new run. A won round pays crumbs (`WIN_CRUMBS` + unused discards, plus
 crumbs picked up on the board), then opens the **shop**. It sells trinkets (passive for the run),
 consumables (held in the pouch, used once) and card stamps (a slot effect stuck on one card, used when
 that card is in a plain slot).
+
+Every `Boss.EVERY` (3) rounds is a **boss round** with an extra rule: THE ALLEY KING (a big cat that
+hunts the mouse), RUNAWAY CHEESE (the cheese runs from the mouse) or KITCHEN LIGHT (a turn limit; running
+out ends the run, see `main.gd` `lost()`). The shop before it names the boss. Beating one pays
+`Boss.WIN_CRUMBS`, offers a free trinket, and adds traps and cats to every later round.
 
 ## Layout
 - `scenes/main.tscn` — the only scene. Nodes the code uses are `%Unique` names (`%Board`, `%Hand`,
@@ -22,15 +31,22 @@ that card is in a plain slot).
 - `scripts/card_slot.gd` — `CardSlot`: the `Effect` enum, `INFO` (name / description / color per
   effect), `play_dir()` for effects that change direction, and `effect_for(card)` (the slot's effect,
   else the card's stamp).
-- `scripts/board.gd` — `Board`: grid, mouse, cheese, mouse-trap and crumb drawing; `step` / `slide` /
-  `jump` movement, each returning true when the round ends (mouse on the cheese, or `is_caught()`
-  on a trap). Jumps only check the landing cell, so they hop over traps and crumbs. Crumbs emit
-  `crumb_collected`.
+- `scripts/board.gd` — `Board`: grid, mouse, cheese, mouse-trap, crumb and cat drawing; `step` / `slide` /
+  `jump` movement, each returning true when the round ends (mouse on the cheese, or `is_caught()`:
+  `is_trapped()` on a trap or `caught_by_cat()` on a cat or its path). Jumps only check the landing
+  cell, so they hop over traps, cat paths and crumbs. Crumbs emit `crumb_collected`. `move_cats()`
+  walks the cats at the end of a turn, `move_cheese()` runs the cheese for RUNAWAY CHEESE;
+  `is_deadly(cell)` says whether moving onto a cell is fatal.
+- `scripts/cat.gd` — `Cat`: one roaming cat's cell and this turn's `path` (`steps` cells), and
+  `plan()`, which picks the next path. A `hunter` (the Alley King) heads for the mouse instead.
+- `scripts/boss.gd` — `Boss`: the `Kind` enum, `INFO` (name / description), and the boss tuning
+  constants (cadence, reward, escalation, per-boss numbers).
 - `scripts/card.gd` — `Card`: the node for a card, with drag-and-drop. `dir` and `stamp` forward to
   its `data`.
 - `scripts/card_data.gd` — `CardData`: a deck card's direction and stamp. Piles hold these.
 - `scripts/deck.gd` — `Deck`: the run's `cards`, and the round's draw and discard piles built from them.
-- `scripts/run.gd` — `Run`: state that lasts a run (deck, round number, crumbs, trinkets, pouch).
+- `scripts/run.gd` — `Run`: state that lasts a run (deck, round number, crumbs, trinkets, pouch,
+  this and the next boss, bosses beaten).
 - `scripts/items.gd` — `Items`: shop content, meaning the `Trinket` and `Consumable` enums with
   name / description / price tables, and the `STAMPS` the shop offers.
 - `scripts/shop.gd` — `Shop`: overlay after a won round. Rolls offers, sells them, and picks the card

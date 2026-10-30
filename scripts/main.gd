@@ -7,6 +7,9 @@ const MIN_CHEESE_DISTANCE := 8
 const TRAP_COUNT := 8
 ## Crumbs scattered on the board each round, worth 1 each.
 const CRUMB_COUNT := 6
+const CAT_COUNT := 2
+## Cats start at least this many cells from the mouse.
+const CAT_MIN_DISTANCE := 6
 ## Chance that a slot gets an effect each turn.
 const EFFECT_CHANCE := 0.5
 ## Cards the player can swap for a new draw each round.
@@ -22,6 +25,7 @@ const FIZZLED := Color(1, 0.5, 0.5, 0.6)
 
 @onready var board: Board = %Board
 @onready var hud_label: Label = %HudLabel
+@onready var boss_label: Label = %BossLabel
 @onready var trinket_row: HFlowContainer = %TrinketRow
 @onready var draw_pile_button: Button = %DrawPileButton
 @onready var discard_button: Button = %DiscardButton
@@ -52,6 +56,11 @@ var trap_survived := false
 var recycled: Array[CardData] = []
 ## Direction of the last step this turn, for ECHO. -1 before the first one.
 var last_dir := -1
+## Set when KITCHEN LIGHT's turns run out, which ends the run like being caught.
+var out_of_time := false
+## For the balance sim: false turns boss rounds off, and a Boss.Kind here makes every round that boss.
+var bosses_enabled := true
+var force_boss := -1
 
 
 func _ready() -> void:
@@ -96,16 +105,25 @@ func new_round() -> void:
 	run.round_number += 1
 	run.deck.new_round()
 	recycled.clear()
+	run.boss = -1
+	if force_boss != -1:
+		run.boss = force_boss
+	elif bosses_enabled and Boss.is_boss_round(run.round_number):
+		run.boss = run.next_boss
+		run.next_boss = Boss.roll(run.boss)
 	var mouse := _random_cell()
 	var cheese := _random_cell()
 	while _distance(mouse, cheese) < MIN_CHEESE_DISTANCE:
 		cheese = _random_cell()
 	var traps := _place_traps(mouse, cheese)
 	var crumbs := _place_crumbs(mouse, cheese, traps)
-	board.place(mouse, cheese, traps, crumbs)
-	BugReport.note("Round %d: mouse %s, cheese %s, traps %s, crumbs %s" % [
-		run.round_number, mouse, cheese, traps, crumbs])
+	var cats := _place_cats(mouse, cheese, traps)
+	board.place(mouse, cheese, traps, crumbs, cats, run.boss == Boss.Kind.ALLEY_KING)
+	BugReport.note("Round %d%s: mouse %s, cheese %s, traps %s, crumbs %s" % [run.round_number,
+		" (boss %s)" % Boss.INFO[run.boss][0] if run.boss != -1 else "", mouse, cheese, traps, crumbs])
+	BugReport.note("Cats: %s" % _cat_paths())
 	turn = 1
+	out_of_time = false
 	discards_left = DISCARDS_PER_ROUND
 	if run.has(Items.Trinket.SPARE_PAWS):
 		discards_left += SPARE_PAWS_DISCARDS
@@ -128,6 +146,10 @@ func start_turn() -> void:
 	BugReport.note("Turn %d: hand %s" % [turn, _card_names(drawn)])
 	_roll_effects()
 	status_label.text = HINT
+	if run.boss != -1 and turn == 1:
+		status_label.text = "Boss round! %s" % HINT
+	elif run.boss == Boss.Kind.KITCHEN_LIGHT and turn == Boss.KITCHEN_LIGHT_TURNS:
+		status_label.text = "Last turn before the kitchen light comes on!"
 	_refresh_hud()
 	_refresh_pouch()
 
@@ -189,6 +211,19 @@ func lock_in() -> void:
 		if card.modulate == PLAYING:
 			card.modulate = PLAYED
 
+	# Before the cats walk: the cheese stays off their paths, so no cat ends up on it.
+	if not ended and run.boss == Boss.Kind.RUNAWAY_CHEESE:
+		status_label.text = "The cheese runs..."
+		await board.move_cheese(Boss.CHEESE_STEPS)
+		BugReport.note("Cheese ran to %s" % board.cheese_cell)
+	if not ended and not board.cats.is_empty():
+		status_label.text = "The cats prowl..."
+		await board.move_cats()
+		BugReport.note("Cats walked: %s" % _cat_paths())
+	if not ended and run.boss == Boss.Kind.KITCHEN_LIGHT and turn >= Boss.KITCHEN_LIGHT_TURNS:
+		out_of_time = true
+		ended = true
+
 	var played: Array[CardData] = []
 	for card in _all_cards():
 		var slot := card.get_parent() as CardSlot
@@ -218,16 +253,23 @@ func lock_in() -> void:
 
 ## Shows how the round ended: crumbs earned and the way to the shop, or the end of the run.
 func _end_round() -> void:
-	if board.is_caught():
-		BugReport.note("Caught in a trap at %s on turn %d of round %d" % [board.mouse_cell, turn, run.round_number])
-		win_label.text = "Snap! The mouse ran into a trap."
+	if out_of_time:
+		BugReport.note("Out of time on turn %d of round %d" % [turn, run.round_number])
+		win_label.text = "Click! The kitchen light came on."
+	elif board.is_caught():
+		var by_cat := board.caught_by_cat()
+		BugReport.note("Caught %s at %s on turn %d of round %d" % [
+			"by a cat" if by_cat else "in a trap", board.mouse_cell, turn, run.round_number])
+		win_label.text = "Pounce! A cat caught the mouse." if by_cat else "Snap! The mouse ran into a trap."
+	if lost():
 		var won := run.round_number - 1
 		win_details.text = "Run over on round %d, after %d cheese%s found." % [
 			run.round_number, won, "" if won == 1 else "s"]
 		win_panel_button.text = "New Run"
 	else:
-		var lines := PackedStringArray(["Cheese  +%d" % WIN_CRUMBS])
-		var earned := WIN_CRUMBS + discards_left
+		var reward := WIN_CRUMBS if run.boss == -1 else Boss.WIN_CRUMBS
+		var lines := PackedStringArray(["%s  +%d" % ["Cheese" if run.boss == -1 else "Boss cheese", reward]])
+		var earned := reward + discards_left
 		if discards_left > 0:
 			lines.append("Unused discards  +%d" % discards_left)
 		if run.has(Items.Trinket.PIGGY_BANK):
@@ -241,6 +283,11 @@ func _end_round() -> void:
 		BugReport.note("Found the cheese on turn %d, earned %d (+%d picked up), %d crumbs" % [
 			turn, earned, round_crumbs, run.crumbs])
 		win_label.text = "You found the cheese in %d turn%s!" % [turn, "" if turn == 1 else "s"]
+		if run.boss != -1:
+			run.bosses_beaten += 1
+			win_label.text = "You beat %s in %d turn%s!" % [Boss.INFO[run.boss][0], turn, "" if turn == 1 else "s"]
+			lines.append("Take a free trinket in the shop.")
+			lines.append("From now on, rounds have %d traps and %d cats." % [_trap_count(), _cat_count()])
 		win_details.text = "\n".join(lines)
 		win_panel_button.text = "Shop"
 	status_label.text = ""
@@ -251,17 +298,22 @@ func _end_round() -> void:
 
 
 func _on_win_panel_button() -> void:
-	if board.is_caught():
+	if lost():
 		new_run()
 	else:
 		win_panel.hide()
-		shop.open(run)
+		shop.open(run, run.boss != -1)
+
+
+## True when the round ended the run: the mouse was caught, or KITCHEN LIGHT's turns ran out.
+func lost() -> bool:
+	return board.is_caught() or out_of_time
 
 
 ## If the mouse is on a trap and THICK FUR hasn't been used this round, breaks the trap and returns
 ## true so the turn carries on.
 func _survive_trap() -> bool:
-	if not board.is_caught() or trap_survived or not run.has(Items.Trinket.THICK_FUR):
+	if not board.is_trapped() or trap_survived or not run.has(Items.Trinket.THICK_FUR):
 		return false
 	trap_survived = true
 	board.remove_trap(board.mouse_cell)
@@ -539,7 +591,13 @@ func _clear_cards() -> void:
 
 
 func _refresh_hud() -> void:
-	hud_label.text = "Round %d · Turn %d · %d crumbs" % [run.round_number, turn, run.crumbs]
+	var turns := "Turn %d" % turn
+	if run.boss == Boss.Kind.KITCHEN_LIGHT:
+		turns += " of %d" % Boss.KITCHEN_LIGHT_TURNS
+	hud_label.text = "Round %d · %s · %d crumbs" % [run.round_number, turns, run.crumbs]
+	boss_label.visible = run.boss != -1
+	if run.boss != -1:
+		boss_label.text = "BOSS  %s" % Boss.describe(run.boss)
 	draw_pile_button.text = "Draw pile: %d" % run.deck.draw_pile.size()
 	discard_button.text = "Discard pile: %d" % run.deck.discard_pile.size()
 	discard_card_button.text = "Discard (%d left)" % discards_left
@@ -591,11 +649,18 @@ func _bug_report_state() -> String:
 	var lines := PackedStringArray()
 	var outcome := ""
 	if win_panel.visible:
-		outcome = "  (caught)" if board.is_caught() else "  (won)"
+		if out_of_time:
+			outcome = "  (out of time)"
+		elif board.is_caught():
+			outcome = "  (caught by a cat)" if board.caught_by_cat() else "  (caught in a trap)"
+		else:
+			outcome = "  (won)"
 	elif shop.visible:
 		outcome = "  (shopping)"
 	lines.append("Round %d, turn %d%s%s, %d discards left" % [run.round_number, turn,
 		"  (moving)" if busy else "", outcome, discards_left])
+	lines.append("Boss: %s, next boss %s, %d beaten" % [Boss.INFO[run.boss][0] if run.boss != -1 else "-",
+		Boss.INFO[run.next_boss][0], run.bosses_beaten])
 	var trinket_names := PackedStringArray()
 	for trinket in run.trinkets:
 		trinket_names.append(Items.TRINKETS[trinket][0])
@@ -609,6 +674,7 @@ func _bug_report_state() -> String:
 		Card.NAMES[board.facing], board.cheese_cell, _distance(board.mouse_cell, board.cheese_cell)])
 	lines.append("Traps: %s" % [board.traps])
 	lines.append("Crumbs on board: %s" % [board.crumbs])
+	lines.append("Cats: %s" % _cat_paths())
 	for slot in slots:
 		var card := slot.get_card()
 		var effect: String = CardSlot.INFO[slot.effect][0]
@@ -652,7 +718,7 @@ func _random_cell() -> Vector2i:
 func _place_traps(mouse: Vector2i, cheese: Vector2i) -> Array[Vector2i]:
 	var traps: Array[Vector2i] = []
 	for attempt in 1000:
-		if traps.size() == TRAP_COUNT:
+		if traps.size() == _trap_count():
 			break
 		var cell := _random_cell()
 		if cell == cheese or _touching(cell, mouse):
@@ -673,6 +739,39 @@ func _place_crumbs(mouse: Vector2i, cheese: Vector2i, traps: Array[Vector2i]) ->
 		if cell not in [mouse, cheese] and cell not in traps and cell not in crumbs:
 			crumbs.append(cell)
 	return crumbs
+
+
+## Picks cat cells off the cheese and the traps, well away from the mouse and spread out from each other.
+func _place_cats(mouse: Vector2i, cheese: Vector2i, traps: Array[Vector2i]) -> Array[Vector2i]:
+	var cats: Array[Vector2i] = []
+	for attempt in 1000:
+		if cats.size() == _cat_count():
+			break
+		var cell := _random_cell()
+		if _distance(cell, mouse) < CAT_MIN_DISTANCE or cell == cheese or cell in traps:
+			continue
+		if cats.any(func(cat: Vector2i) -> bool: return _distance(cell, cat) < CAT_MIN_DISTANCE):
+			continue
+		cats.append(cell)
+	return cats
+
+
+## Traps each round: TRAP_COUNT, plus more for each boss beaten this run.
+func _trap_count() -> int:
+	return TRAP_COUNT + run.bosses_beaten * Boss.TRAPS_PER_BOSS
+
+
+## Cats each round: CAT_COUNT, plus one for every Boss.BOSSES_PER_CAT bosses beaten this run.
+func _cat_count() -> int:
+	return CAT_COUNT + mini(floori(run.bosses_beaten / float(Boss.BOSSES_PER_CAT)), Boss.MAX_EXTRA_CATS)
+
+
+## Each cat's cell and the path it will walk, for the bug report.
+func _cat_paths() -> String:
+	var parts := PackedStringArray()
+	for cat in board.cats:
+		parts.append("%s -> %s" % [cat.cell, cat.path])
+	return ", ".join(parts) if not parts.is_empty() else "(none)"
 
 
 ## True when the cells are the same or neighbors, including diagonally.
