@@ -7,18 +7,34 @@ that changes how the card in that slot plays. Slot effects are where the game's 
 Each round also gives `DISCARDS_PER_ROUND` (5) discards: right-click a card, or drag it onto the
 Discard button, to swap it for a new draw (`main.gd` `discard_card`).
 
+Rounds chain into an endless **run**: the deck, crumbs, trinkets and pouch carry over until a trap
+catches the mouse, which starts a new run. A won round pays crumbs (`WIN_CRUMBS` + unused discards, plus
+crumbs picked up on the board), then opens the **shop**. It sells trinkets (passive for the run),
+consumables (held in the pouch, used once) and card stamps (a slot effect stuck on one card, used when
+that card is in a plain slot).
+
 ## Layout
 - `scenes/main.tscn` — the only scene. Nodes the code uses are `%Unique` names (`%Board`, `%Hand`,
   `%SlotRow`, `%LockInButton`, `%WinPanel`, ...).
-- `scripts/main.gd` — turn controller: deals hands, rolls slot effects (`_roll_effects`), plays a turn
-  (`lock_in` → `_play`), applies deck effects after the turn.
+- `scripts/main.gd` — turn controller: starts runs and rounds (`new_run` / `new_round`), deals hands,
+  rolls slot effects (`_roll_effects`), plays a turn (`lock_in` → `_play`), applies deck effects after
+  the turn, pays out the round (`_end_round`), uses consumables (`use_consumable`) and applies trinkets.
 - `scripts/card_slot.gd` — `CardSlot`: the `Effect` enum, `INFO` (name / description / color per
-  effect), and `play_dir()` for effects that change direction.
-- `scripts/board.gd` — `Board`: grid, mouse, cheese and mouse-trap drawing; `step` / `slide` /
+  effect), `play_dir()` for effects that change direction, and `effect_for(card)` (the slot's effect,
+  else the card's stamp).
+- `scripts/board.gd` — `Board`: grid, mouse, cheese, mouse-trap and crumb drawing; `step` / `slide` /
   `jump` movement, each returning true when the round ends (mouse on the cheese, or `is_caught()`
-  on a trap). Jumps only check the landing cell, so they hop over traps.
-- `scripts/card.gd` — `Card`: a direction card (`Card.Dir`), with drag-and-drop.
-- `scripts/deck.gd` — `Deck`: draw and discard piles of `Card.Dir` ints.
+  on a trap). Jumps only check the landing cell, so they hop over traps and crumbs. Crumbs emit
+  `crumb_collected`.
+- `scripts/card.gd` — `Card`: the node for a card, with drag-and-drop. `dir` and `stamp` forward to
+  its `data`.
+- `scripts/card_data.gd` — `CardData`: a deck card's direction and stamp. Piles hold these.
+- `scripts/deck.gd` — `Deck`: the run's `cards`, and the round's draw and discard piles built from them.
+- `scripts/run.gd` — `Run`: state that lasts a run (deck, round number, crumbs, trinkets, pouch).
+- `scripts/items.gd` — `Items`: shop content, meaning the `Trinket` and `Consumable` enums with
+  name / description / price tables, and the `STAMPS` the shop offers.
+- `scripts/shop.gd` — `Shop`: overlay after a won round. Rolls offers, sells them, and picks the card
+  for a stamp.
 - `scripts/pile_viewer.gd` — `PileViewer`: overlay opened from the HUD's pile buttons that lists a
   pile's cards, sorted by direction so the draw order stays hidden.
 - `scripts/bug_report.gd` — `BugReport`: F12 panel that saves a description, screenshot, game state

@@ -1,26 +1,34 @@
 class_name Deck
 extends RefCounted
-## Draw pile and discard pile of direction cards (Card.Dir values).
+## The run's cards, plus the draw and discard piles a round plays from.
 
 const COPIES_PER_DIRECTION := 3
 
-var draw_pile: Array[int] = []
-var discard_pile: Array[int] = []
+## Every card the player owns. Persists across a run's rounds; stamps bought in the shop live here.
+var cards: Array[CardData] = []
+var draw_pile: Array[CardData] = []
+var discard_pile: Array[CardData] = []
 
 
-## Rebuilds the starting 12-card deck and shuffles it.
-func reset() -> void:
-	draw_pile.clear()
-	discard_pile.clear()
+## Builds the starting 12-card deck and shuffles it into the draw pile.
+func new_run() -> void:
+	cards.clear()
 	for dir in Card.Dir.values():
 		for i in COPIES_PER_DIRECTION:
-			draw_pile.append(dir)
+			cards.append(CardData.new(dir))
+	new_round()
+
+
+## Shuffles the whole deck into the draw pile. Cards burned or copied last round are back to normal.
+func new_round() -> void:
+	draw_pile = cards.duplicate()
+	discard_pile.clear()
 	draw_pile.shuffle()
 
 
 ## Draws up to n cards, reshuffling the discard pile in when the draw pile runs out.
-func draw(n: int) -> Array[int]:
-	var hand: Array[int] = []
+func draw(n: int) -> Array[CardData]:
+	var hand: Array[CardData] = []
 	for i in n:
 		if draw_pile.is_empty():
 			if discard_pile.is_empty():
@@ -30,8 +38,8 @@ func draw(n: int) -> Array[int]:
 	return hand
 
 
-func discard(cards: Array[int]) -> void:
-	discard_pile.append_array(cards)
+func discard(discarded: Array[CardData]) -> void:
+	discard_pile.append_array(discarded)
 
 
 func _reshuffle() -> void:

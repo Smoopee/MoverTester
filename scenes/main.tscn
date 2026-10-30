@@ -64,10 +64,22 @@ layout_mode = 2
 size_flags_horizontal = 3
 theme_override_constants/separation = 14
 
-[node name="Title" type="Label" parent="Margin/Layout/Side"]
+[node name="TitleRow" type="HBoxContainer" parent="Margin/Layout/Side"]
+layout_mode = 2
+theme_override_constants/separation = 20
+
+[node name="Title" type="Label" parent="Margin/Layout/Side/TitleRow"]
 layout_mode = 2
 theme_override_font_sizes/font_size = 30
 text = "Mouse & Cheese"
+
+[node name="TrinketRow" type="HFlowContainer" parent="Margin/Layout/Side/TitleRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+theme_override_constants/h_separation = 10
+theme_override_constants/v_separation = 0
 
 [node name="Hud" type="HBoxContainer" parent="Margin/Layout/Side"]
 layout_mode = 2
@@ -129,6 +141,11 @@ layout_mode = 2
 size_flags_horizontal = 3
 modulate = Color(1, 1, 1, 0.7)
 text = "Hand"
+
+[node name="PouchRow" type="HBoxContainer" parent="Margin/Layout/Side/HandHeader"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 6
 
 [node name="DiscardCardButton" type="Button" parent="Margin/Layout/Side/HandHeader"]
 unique_name_in_owner = true
@@ -193,9 +210,16 @@ theme_override_font_sizes/font_size = 26
 text = "You found the cheese!"
 horizontal_alignment = 1
 
-[node name="NewRoundButton" type="Button" parent="WinPanel/Center/Box/VBox"]
+[node name="WinDetails" type="Label" parent="WinPanel/Center/Box/VBox"]
+unique_name_in_owner = true
+layout_mode = 2
+modulate = Color(1, 1, 1, 0.8)
+theme_override_font_sizes/font_size = 18
+horizontal_alignment = 1
+
+[node name="WinPanelButton" type="Button" parent="WinPanel/Center/Box/VBox"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 44)
 layout_mode = 2
 theme_override_font_sizes/font_size = 20
-text = "New Round"
+text = "Shop"

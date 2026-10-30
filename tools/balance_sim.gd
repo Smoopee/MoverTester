@@ -16,6 +16,9 @@ var round_turns: Array[int] = []
 var unfinished := 0
 ## Rounds lost to a mouse trap.
 var caught := 0
+## Crumbs earned in rounds that reached the cheese: the win reward, unused discards and pickups.
+var won_crumbs := 0
+var crumbs_picked_up := 0
 ## Per effect: [times rolled, times the bot used it, total cells gained on those turns, winning turns].
 var effect_stats := {}
 ## Cells gained per turn and turn count on turns where cards went only into plain slots.
@@ -46,7 +49,11 @@ func _run() -> void:
 	board.animate = false
 	for r in rounds:
 		if r > 0:
-			main.new_round()
+			# A trap ends the run. The bot never shops, so a run's state doesn't change its play.
+			if board.is_caught():
+				main.new_run()
+			else:
+				main.new_round()
 		await _play_round()
 		# Let freed cards leave the tree.
 		await process_frame
@@ -55,6 +62,7 @@ func _run() -> void:
 
 
 func _play_round() -> void:
+	var crumbs_before: int = main.run.crumbs
 	while not main.win_panel.visible:
 		if main.turn > MAX_TURNS:
 			unfinished += 1
@@ -79,6 +87,8 @@ func _play_round() -> void:
 		caught += 1
 	else:
 		round_turns.append(main.turn)
+		won_crumbs += main.run.crumbs - crumbs_before
+		crumbs_picked_up += main.round_crumbs
 
 
 ## Greedy bot: for each slot in play order, places the card that brings the mouse closest to the cheese,
@@ -171,6 +181,8 @@ func _report() -> void:
 		var share := 100.0 * count / n
 		var label := "%d-%d" % bucket if bucket[1] < MAX_TURNS else "%d+" % bucket[0]
 		print("  %-6s %5.1f%%  %s" % [label, share, "#".repeat(roundi(share / 2))])
+	print("Crumbs per won round: %.1f (%.1f picked up on the board)" % [
+		float(won_crumbs) / n, float(crumbs_picked_up) / n])
 
 	print("\nCells gained per turn with cards only in plain slots: %.2f" % [
 		float(plain_gain) / max(plain_turns, 1)])

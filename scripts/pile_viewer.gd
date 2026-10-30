@@ -1,7 +1,7 @@
 class_name PileViewer
 extends Control
-## Overlay that lists the cards in a pile. Cards are shown sorted by direction, so viewing the draw
-## pile doesn't reveal what's coming next. Closes on Close, Esc, or a click outside the panel.
+## Overlay that lists the cards in a pile. Cards are shown sorted by direction and stamp, so viewing the
+## draw pile doesn't reveal what's coming next. Closes on Close, Esc, or a click outside the panel.
 
 const COLUMNS := 6
 const MAX_GRID_HEIGHT := 360.0
@@ -15,7 +15,8 @@ var _close_button := Button.new()
 
 
 func _ready() -> void:
-	set_anchors_preset(Control.PRESET_FULL_RECT)
+	# Offsets too: this node is already in the tree, so anchors alone would keep its zero size.
+	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	hide()
 
 	var dim := ColorRect.new()
@@ -71,23 +72,23 @@ func _ready() -> void:
 	vbox.add_child(_close_button)
 
 
-## Shows the cards in dirs (Card.Dir values) under the given title.
-func show_pile(title: String, dirs: Array[int]) -> void:
-	var sorted := dirs.duplicate()
-	sorted.sort()
+## Shows the cards under the given title.
+func show_pile(title: String, cards: Array[CardData]) -> void:
+	var sorted := CardData.sorted(cards)
 	_title.text = "%s (%d)" % [title, sorted.size()]
 
 	var counts := PackedStringArray()
 	for dir in Card.Dir.values():
-		counts.append("%s %d" % [Card.NAMES[dir], sorted.count(dir)])
+		counts.append("%s %d" % [Card.NAMES[dir], sorted.filter(func(c: CardData) -> bool:
+			return c.dir == dir).size()])
 	_summary.text = "   ".join(counts)
 
 	for child in _grid.get_children():
 		_grid.remove_child(child)
 		child.queue_free()
-	for dir in sorted:
+	for data in sorted:
 		var card := Card.new()
-		card.dir = dir as Card.Dir
+		card.data = data
 		card.disabled = true
 		card.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		_grid.add_child(card)

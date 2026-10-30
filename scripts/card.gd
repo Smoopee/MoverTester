@@ -39,7 +39,16 @@ const ARROW_POINTS: Array[Vector2] = [
 	Vector2(-6, 20), Vector2(-6, -4), Vector2(-18, -4),
 ]
 
-var dir: Dir = Dir.UP
+## The deck card this node shows. Set it, or dir, before adding the node to the tree.
+var data := CardData.new()
+var dir: Dir:
+	get:
+		return data.dir
+	set(value):
+		data.dir = value
+var stamp: CardSlot.Effect:
+	get:
+		return data.stamp
 
 
 func _ready() -> void:
@@ -51,6 +60,9 @@ func _ready() -> void:
 	add_theme_stylebox_override("hover", _make_style(Color("fffaf0"), color))
 	add_theme_stylebox_override("pressed", _make_style(Color("e6dcc4"), color))
 	add_theme_stylebox_override("disabled", _make_style(Color("f4ecd8"), color))
+	if stamp != CardSlot.Effect.NONE:
+		var info: Array = CardSlot.INFO[stamp]
+		tooltip_text = "%s stamp: %s Only in a slot with no effect of its own." % [info[0], info[1]]
 
 
 func _draw() -> void:
@@ -60,6 +72,11 @@ func _draw() -> void:
 	draw_set_transform(Vector2.ZERO)
 	draw_string(get_theme_default_font(), Vector2(0, size.y - 12), NAMES[dir],
 			HORIZONTAL_ALIGNMENT_CENTER, size.x, 14, color.darkened(0.25))
+	if stamp != CardSlot.Effect.NONE:
+		var info: Array = CardSlot.INFO[stamp]
+		draw_rect(Rect2(3, 3, size.x - 6, 18), info[2])
+		draw_string(get_theme_default_font(), Vector2(0, 16), info[0],
+				HORIZONTAL_ALIGNMENT_CENTER, size.x, 12, Color("2a2420"))
 
 
 func _gui_input(event: InputEvent) -> void:
@@ -73,7 +90,7 @@ func _get_drag_data(_at_position: Vector2) -> Variant:
 	if disabled:
 		return null
 	var preview := Card.new()
-	preview.dir = dir
+	preview.data = data
 	preview.position = -CARD_SIZE / 2
 	preview.modulate.a = 0.85
 	var holder := Control.new()
@@ -83,12 +100,12 @@ func _get_drag_data(_at_position: Vector2) -> Variant:
 	return self
 
 
-func _can_drop_data(_at_position: Vector2, data: Variant) -> bool:
-	return data is Card and data != self and not disabled
+func _can_drop_data(_at_position: Vector2, dropped: Variant) -> bool:
+	return dropped is Card and dropped != self and not disabled
 
 
-func _drop_data(_at_position: Vector2, data: Variant) -> void:
-	card_dropped_on.emit(data)
+func _drop_data(_at_position: Vector2, dropped: Variant) -> void:
+	card_dropped_on.emit(dropped)
 
 
 func _notification(what: int) -> void:
