@@ -46,6 +46,9 @@ func _ready() -> void:
 	hand_box.set_drag_forwarding(Callable(), _can_drop_on_hand, _drop_on_hand)
 	lock_in_button.pressed.connect(lock_in)
 	new_round_button.pressed.connect(new_round)
+	var bug_report := BugReport.new()
+	bug_report.get_state = _bug_report_state
+	add_child(bug_report)
 	new_round()
 
 
@@ -58,6 +61,7 @@ func new_round() -> void:
 	while _distance(mouse, cheese) < MIN_CHEESE_DISTANCE:
 		cheese = _random_cell()
 	board.place(mouse, cheese)
+	BugReport.note("New round: mouse %s, cheese %s" % [mouse, cheese])
 	turn = 1
 	win_panel.hide()
 	start_turn()
@@ -74,6 +78,7 @@ func start_turn() -> void:
 		card.pressed.connect(_on_card_clicked.bind(card))
 		card.card_dropped_on.connect(_on_card_dropped_on_card.bind(card))
 		hand_box.add_child(card)
+	BugReport.note("Turn %d: hand %s" % [turn, _dir_names(dirs)])
 	_roll_effects()
 	status_label.text = HINT
 	_refresh_hud()
@@ -91,6 +96,7 @@ func lock_in() -> void:
 	for slot in slots:
 		slot.header.disabled = true
 
+	BugReport.note("Lock in")
 	last_dir = -1
 	var order := _play_order()
 	var reached := false
@@ -112,9 +118,17 @@ func lock_in() -> void:
 			var offset: Vector2i = Card.OFFSETS[dir] + Card.OFFSETS[partner_dir]
 			last_dir = partner_dir
 			reached = await board.jump(offset, dir)
+			BugReport.note("  Slot %d DIAGONAL %s + slot %d %s %s -> mouse %s" % [
+				slot.number, Card.NAMES[card.dir], partner_slot.number,
+				CardSlot.INFO[partner_slot.effect][0], Card.NAMES[partner.dir], board.mouse_cell])
 			partner.modulate = PLAYED
 		else:
 			reached = await _play(slot, card)
+			# Facing is the last direction moved, which differs from the card for WILD, GAMBLE, etc.
+			BugReport.note("  Slot %d %s%s -> mouse %s" % [slot.number,
+				" ".join(PackedStringArray([CardSlot.INFO[slot.effect][0], Card.NAMES[card.dir]])).strip_edges(),
+				" (moved %s)" % Card.NAMES[board.facing] if board.facing != card.dir else "",
+				board.mouse_cell])
 		if card.modulate == PLAYING:
 			card.modulate = PLAYED
 
@@ -137,6 +151,7 @@ func lock_in() -> void:
 	lock_in_button.disabled = false
 
 	if reached:
+		BugReport.note("Found the cheese on turn %d" % turn)
 		win_label.text = "You found the cheese in %d turn%s!" % [turn, "" if turn == 1 else "s"]
 		win_panel.show()
 		_refresh_hud()
@@ -171,9 +186,11 @@ func _play(slot: CardSlot, card: Card) -> bool:
 			var now := _distance(board.mouse_cell, board.cheese_cell)
 			if _distance(board.mouse_cell + offset, board.cheese_cell) >= now:
 				card.modulate = FIZZLED
+				BugReport.note("  Slot %d SNIFF %s fizzled" % [slot.number, Card.NAMES[dir]])
 				status_label.text = "Sniff: %s isn't toward the cheese, so the mouse stays put." % Card.NAMES[dir]
 				if board.animate:
-					await get_tree().create_timer(Board.STEP_TIME * 2).timeout
+					# Not process_always, so it waits while the F12 bug report has the game paused.
+					await get_tree().create_timer(Board.STEP_TIME * 2, false).timeout
 				return false
 	return await _steps(dir, 1)
 
@@ -221,6 +238,7 @@ func _roll_effects() -> void:
 			var info: Array = CardSlot.INFO[slot.effect]
 			lines.append("Slot %d  %s: %s" % [slot.number, info[0], info[1]])
 	effects_label.text = "No slot effects this turn." if lines.is_empty() else "\n".join(lines)
+	BugReport.note("Effects: %s" % _slot_effects())
 
 
 func _on_card_clicked(card: Card) -> void:
@@ -230,8 +248,10 @@ func _on_card_clicked(card: Card) -> void:
 		var slot := _first_empty_slot()
 		if slot:
 			card.reparent(slot, false)
+			BugReport.note("%s -> slot %d" % [Card.NAMES[card.dir], slot.number])
 	else:
 		card.reparent(hand_box, false)
+		BugReport.note("%s -> hand" % Card.NAMES[card.dir])
 
 
 func _on_card_dropped_on_slot(card: Card, slot: CardSlot) -> void:
@@ -243,7 +263,7 @@ func _on_card_dropped_on_card(card: Card, target: Card) -> void:
 	if parent is CardSlot:
 		_place_in_slot(card, parent)
 	else:
-		card.reparent(hand_box, false)
+		_drop_on_hand(Vector2.ZERO, card)
 
 
 ## Puts a card in a slot. A card already there swaps to where the incoming card came from.
@@ -254,6 +274,8 @@ func _place_in_slot(card: Card, slot: CardSlot) -> void:
 	if existing:
 		existing.reparent(card.get_parent(), false)
 	card.reparent(slot, false)
+	BugReport.note("%s -> slot %d%s" % [Card.NAMES[card.dir], slot.number,
+		" (swapped out %s)" % Card.NAMES[existing.dir] if existing else ""])
 
 
 func _can_drop_on_hand(_at_position: Vector2, data: Variant) -> bool:
@@ -262,6 +284,7 @@ func _can_drop_on_hand(_at_position: Vector2, data: Variant) -> bool:
 
 func _drop_on_hand(_at_position: Vector2, data: Variant) -> void:
 	data.reparent(hand_box, false)
+	BugReport.note("%s -> hand" % Card.NAMES[data.dir])
 
 
 func _first_empty_slot() -> CardSlot:
@@ -292,6 +315,46 @@ func _clear_cards() -> void:
 func _refresh_hud() -> void:
 	hud_label.text = "Turn %d     Draw pile: %d     Discard: %d" % [
 		turn, deck.draw_pile.size(), deck.discard_pile.size()]
+
+
+## Snapshot of the round for an F12 bug report.
+func _bug_report_state() -> String:
+	var lines := PackedStringArray()
+	lines.append("Turn %d%s%s" % [turn, "  (moving)" if busy else "", "  (won)" if win_panel.visible else ""])
+	lines.append("Mouse %s facing %s, cheese %s, distance %d" % [board.mouse_cell,
+		Card.NAMES[board.facing], board.cheese_cell, _distance(board.mouse_cell, board.cheese_cell)])
+	for slot in slots:
+		var card := slot.get_card()
+		var effect: String = CardSlot.INFO[slot.effect][0]
+		if slot.effect == CardSlot.Effect.WILD:
+			effect += " " + Card.NAMES[slot.wild_dir]
+		lines.append("Slot %d  %-14s %s" % [slot.number, effect if effect else "-",
+			Card.NAMES[card.dir] if card else "(empty)"])
+	var hand: Array[int] = []
+	for child in hand_box.get_children():
+		if child is Card:
+			hand.append(child.dir)
+	lines.append("Hand: %s" % _dir_names(hand))
+	lines.append("Draw pile (%d, top last): %s" % [deck.draw_pile.size(), _dir_names(deck.draw_pile)])
+	lines.append("Discard (%d): %s" % [deck.discard_pile.size(), _dir_names(deck.discard_pile)])
+	lines.append("Recycled: %s" % _dir_names(recycled))
+	lines.append("Last dir: %s" % (Card.NAMES[last_dir] if last_dir != -1 else "-"))
+	return "\n".join(lines)
+
+
+func _slot_effects() -> String:
+	var names := PackedStringArray()
+	for slot in slots:
+		var effect: String = CardSlot.INFO[slot.effect][0]
+		names.append(effect if effect else "-")
+	return " | ".join(names)
+
+
+func _dir_names(dirs: Array[int]) -> String:
+	var names := PackedStringArray()
+	for dir in dirs:
+		names.append(Card.NAMES[dir])
+	return ", ".join(names) if not names.is_empty() else "(none)"
 
 
 func _random_cell() -> Vector2i:

@@ -123,6 +123,7 @@ func _drop_data(_at_position: Vector2, data: Variant) -> void:
 func _on_header_pressed() -> void:
 	var offset: Vector2i = Card.OFFSETS[wild_dir]
 	wild_dir = Card.OFFSETS.find_key(Vector2i(-offset.y, offset.x)) as Card.Dir
+	BugReport.note("Slot %d WILD -> %s" % [number, Card.NAMES[wild_dir]])
 	_refresh()
 
 
