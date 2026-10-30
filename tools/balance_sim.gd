@@ -3,19 +3,27 @@ extends SceneTree
 ## how long rounds take and how each slot effect performs.
 ##
 ## godot --headless --path . --script res://tools/balance_sim.gd -- --rounds 500 --seed 1
+##
+## Boss rounds are off unless --boss names one (alley_king, runaway_cheese, kitchen_light): then every
+## round is that boss, each on a fresh run so beaten bosses don't stack up traps and cats.
 
 const MAX_TURNS := 200
 
 var rounds := 500
 var rng_seed := 1
+## The Boss.Kind every round is, or -1 for plain rounds.
+var boss := -1
 var main: Node
 var board: Board
 
 ## Turns each round that reached the cheese took.
 var round_turns: Array[int] = []
 var unfinished := 0
-## Rounds lost to a mouse trap.
+## Rounds lost to a mouse trap, and to a cat.
 var caught := 0
+var caught_by_cat := 0
+## Rounds lost to KITCHEN LIGHT's turn limit.
+var out_of_time := 0
 ## Crumbs earned in rounds that reached the cheese: the win reward, unused discards and pickups.
 var won_crumbs := 0
 var crumbs_picked_up := 0
@@ -36,6 +44,12 @@ func _initialize() -> void:
 				rounds = args[i + 1].to_int()
 			"--seed":
 				rng_seed = args[i + 1].to_int()
+			"--boss":
+				boss = Boss.Kind.get(args[i + 1].to_upper(), -1)
+				if boss == -1:
+					printerr("Unknown boss %s, expected one of %s" % [args[i + 1], Boss.Kind.keys()])
+					quit(1)
+					return
 	for effect in CardSlot.Effect.values():
 		effect_stats[effect] = [0, 0, 0, 0]
 	_run.call_deferred()
@@ -47,10 +61,14 @@ func _run() -> void:
 	root.add_child(main)
 	board = main.board
 	board.animate = false
+	main.bosses_enabled = false
+	main.force_boss = boss
+	if boss != -1:
+		main.new_run()
 	for r in rounds:
 		if r > 0:
-			# A trap ends the run. The bot never shops, so a run's state doesn't change its play.
-			if board.is_caught():
+			# Being caught ends the run. The bot never shops, so a run's state doesn't change its play.
+			if main.lost() or boss != -1:
 				main.new_run()
 			else:
 				main.new_round()
@@ -72,7 +90,7 @@ func _play_round() -> void:
 		for slot: CardSlot in main.slots:
 			effect_stats[slot.effect][0] += 1
 		await main.lock_in()
-		var won: bool = main.win_panel.visible and not board.is_caught()
+		var won: bool = main.win_panel.visible and not main.lost()
 		var gain := before - _distance()
 		if used.is_empty() and placed > 0:
 			plain_gain += gain
@@ -83,7 +101,11 @@ func _play_round() -> void:
 			stats[2] += gain
 			if won:
 				stats[3] += 1
-	if board.is_caught():
+	if main.out_of_time:
+		out_of_time += 1
+	elif board.caught_by_cat():
+		caught_by_cat += 1
+	elif board.is_caught():
 		caught += 1
 	else:
 		round_turns.append(main.turn)
@@ -92,8 +114,9 @@ func _play_round() -> void:
 
 
 ## Greedy bot: for each slot in play order, places the card that brings the mouse closest to the cheese,
-## and only if it gets closer. Ignores distance effects. Never steps straight onto a trap; if one is in
-## the way and nothing else gets closer, it sidesteps. Returns the effects of the slots it used.
+## and only if it gets closer. Ignores distance effects. Never steps straight onto a trap, a cat or a
+## cat's path; if one is in the way and nothing else gets closer, it sidesteps. Returns the effects of
+## the slots it used.
 func _place_cards() -> Array[CardSlot.Effect]:
 	var used: Array[CardSlot.Effect] = []
 	var pos := board.mouse_cell
@@ -110,7 +133,7 @@ func _place_cards() -> Array[CardSlot.Effect]:
 				dir = _best_dir(pos)
 				slot.wild_dir = dir
 			var cell := _clamp(pos + Card.OFFSETS[slot.play_dir(dir)])
-			if cell in board.traps:
+			if board.is_deadly(cell):
 				trap_in_way = trap_in_way or _dist(cell) < _dist(pos)
 			elif _dist(cell) < _dist(best_cell):
 				best = card
@@ -133,7 +156,7 @@ func _sidestep(pos: Vector2i, used: Array[CardSlot.Effect]) -> void:
 			continue
 		for card: Card in main.hand_box.get_children():
 			var cell := _clamp(pos + Card.OFFSETS[slot.play_dir(card.dir)])
-			if cell != pos and cell not in board.traps:
+			if cell != pos and not board.is_deadly(cell):
 				main._place_in_slot(card, slot)
 				placed += 1
 				if slot.effect != CardSlot.Effect.NONE:
@@ -169,8 +192,12 @@ func _report() -> void:
 	for t in sorted:
 		total += t
 	var n := sorted.size()
-	print("\nBalance sim: %d rounds, seed %d, greedy bot" % [rounds, rng_seed])
+	print("\nBalance sim: %d rounds, seed %d, greedy bot%s" % [rounds, rng_seed,
+		", boss %s" % Boss.INFO[boss][0] if boss != -1 else ""])
 	print("Caught in a trap: %d rounds (%.1f%%)" % [caught, 100.0 * caught / max(rounds, 1)])
+	print("Caught by a cat: %d rounds (%.1f%%)" % [caught_by_cat, 100.0 * caught_by_cat / max(rounds, 1)])
+	if boss == Boss.Kind.KITCHEN_LIGHT:
+		print("Out of time: %d rounds (%.1f%%)" % [out_of_time, 100.0 * out_of_time / max(rounds, 1)])
 	if n == 0:
 		print("No rounds finished.")
 		return
