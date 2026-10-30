@@ -119,10 +119,24 @@ size_flags_horizontal = 0
 theme_override_font_sizes/font_size = 20
 text = "Lock In"
 
-[node name="HandTitle" type="Label" parent="Margin/Layout/Side"]
+[node name="HandHeader" type="HBoxContainer" parent="Margin/Layout/Side"]
+custom_minimum_size = Vector2(520, 0)
 layout_mode = 2
+size_flags_horizontal = 0
+
+[node name="HandTitle" type="Label" parent="Margin/Layout/Side/HandHeader"]
+layout_mode = 2
+size_flags_horizontal = 3
 modulate = Color(1, 1, 1, 0.7)
 text = "Hand"
+
+[node name="DiscardCardButton" type="Button" parent="Margin/Layout/Side/HandHeader"]
+unique_name_in_owner = true
+layout_mode = 2
+tooltip_text = "Drag a card here, or right-click it, to swap it for a new card."
+focus_mode = 0
+mouse_default_cursor_shape = 2
+text = "Discard (5 left)"
 
 [node name="Hand" type="HBoxContainer" parent="Margin/Layout/Side"]
 unique_name_in_owner = true
