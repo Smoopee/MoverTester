@@ -1,6 +1,6 @@
 class_name Board
 extends Control
-## The grid, the mouse and the cheese, all drawn in code.
+## The grid, the mouse, the cheese and the mouse traps, all drawn in code.
 
 const GRID := 20
 const CELL := 30
@@ -17,11 +17,19 @@ const CHEESE_HOLE := Color("d9a520")
 const FUR := Color("9a9a9e")
 const FUR_DARK := Color("7d7d82")
 const PINK := Color("f2a6b3")
+const TRAP_WOOD := Color("d9a066")
+const TRAP_GRAIN := Color("c08850")
+const TRAP_WOOD_EDGE := Color("8a5a2b")
+const STEEL := Color("dfe3ea")
+const STEEL_EDGE := Color("4a4e55")
+const SHADOW := Color(0, 0, 0, 0.2)
 
 ## When false, moves finish instantly instead of tweening (used by the headless balance sim).
 var animate := true
 var mouse_cell := Vector2i.ZERO
 var cheese_cell := Vector2i.ZERO
+## Cells with a mouse trap. Moving onto one loses the round; jumping over one is safe.
+var traps: Array[Vector2i] = []
 var facing: Card.Dir = Card.Dir.UP
 ## Mouse position in cell units; tweened between cells so the move is animated.
 var mouse_pos := Vector2.ZERO:
@@ -39,15 +47,16 @@ func _ready() -> void:
 	custom_minimum_size = Vector2(GRID * CELL, GRID * CELL)
 
 
-func place(mouse: Vector2i, cheese: Vector2i) -> void:
+func place(mouse: Vector2i, cheese: Vector2i, trap_cells: Array[Vector2i] = []) -> void:
 	mouse_cell = mouse
 	cheese_cell = cheese
+	traps = trap_cells
 	facing = Card.Dir.UP
 	mouse_pos = Vector2(mouse)
 
 
 ## Moves the mouse one cell (bumping off walls, or coming in on the opposite side if wrap is set).
-## Returns true if it is on the cheese.
+## Returns true if the move ends the round (see _finish).
 func step(dir: Card.Dir, wrap := false) -> bool:
 	facing = dir
 	var offset: Vector2i = Card.OFFSETS[dir]
@@ -69,14 +78,14 @@ func step(dir: Card.Dir, wrap := false) -> bool:
 	return await _finish(tween)
 
 
-## Moves the mouse in a straight line until it hits a wall or reaches the cheese.
+## Moves the mouse in a straight line until it hits a wall, a trap or the cheese.
 func slide(dir: Card.Dir) -> bool:
 	var offset: Vector2i = Card.OFFSETS[dir]
 	if not _in_bounds(mouse_cell + offset):
 		return await step(dir)
 	facing = dir
 	var cells := 0
-	while _in_bounds(mouse_cell + offset) and mouse_cell != cheese_cell:
+	while _in_bounds(mouse_cell + offset) and mouse_cell != cheese_cell and not is_caught():
 		mouse_cell += offset
 		cells += 1
 	var tween := create_tween().set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
@@ -94,7 +103,13 @@ func jump(offset: Vector2i, dir: Card.Dir) -> bool:
 	return await _finish(tween)
 
 
-## Waits for a move's tween, or skips it when not animating. Returns true if on the cheese.
+## True when the mouse is on a trap cell.
+func is_caught() -> bool:
+	return mouse_cell in traps
+
+
+## Waits for a move's tween, or skips it when not animating. Returns true if the round is over:
+## the mouse is on the cheese or caught in a trap.
 func _finish(tween: Tween) -> bool:
 	if animate:
 		await tween.finished
@@ -102,7 +117,7 @@ func _finish(tween: Tween) -> bool:
 		tween.kill()
 		mouse_pos = Vector2(mouse_cell)
 		hop = 0.0
-	return mouse_cell == cheese_cell
+	return mouse_cell == cheese_cell or is_caught()
 
 
 func _in_bounds(cell: Vector2i) -> bool:
@@ -116,10 +131,17 @@ func _draw() -> void:
 			draw_rect(Rect2(x * CELL, y * CELL, CELL, CELL), color)
 	draw_rect(Rect2(0, 0, GRID * CELL, GRID * CELL), BORDER, false, 3.0)
 	_draw_cheese(_cell_center(Vector2(cheese_cell)))
+	# Once the mouse has landed on a trap, that trap has snapped shut.
+	var snapped := is_caught() and mouse_pos == Vector2(mouse_cell)
+	for trap in traps:
+		_draw_trap(_cell_center(Vector2(trap)), snapped and trap == mouse_cell)
 	var center := _cell_center(mouse_pos)
 	if hop > 0.0:
-		draw_colored_polygon(_ellipse(center + Vector2(0, 6), Vector2(9, 4)), Color(0, 0, 0, 0.2))
+		draw_colored_polygon(_ellipse(center + Vector2(0, 6), Vector2(9, 4)), SHADOW)
 	_draw_mouse(center - Vector2(0, hop))
+	if snapped:
+		var bar := PackedVector2Array([Vector2(-6, -1), Vector2(-6, 9), Vector2(6, 9), Vector2(6, -1)])
+		_draw_steel(_offset(bar, center), 2.5)
 
 
 func _cell_center(cell: Vector2) -> Vector2:
@@ -136,6 +158,45 @@ func _draw_cheese(center: Vector2) -> void:
 	draw_circle(center + Vector2(6, 4), 2.5, CHEESE_HOLE)
 	draw_circle(center + Vector2(9, -3), 1.6, CHEESE_HOLE)
 	draw_circle(center + Vector2(0, 6), 1.5, CHEESE_HOLE)
+
+
+## Draws a top-down snap trap: a wooden block with a steel bar cocked back over the top half and a
+## cheese bait pedal on the bottom half. A snapped trap leaves out the bar and bait, which the caller
+## draws over the mouse instead.
+func _draw_trap(center: Vector2, snapped: bool) -> void:
+	var base := Rect2(center - Vector2(8, 13), Vector2(16, 26))
+	draw_rect(Rect2(base.position + Vector2(1.5, 2), base.size), SHADOW)
+	draw_rect(base, TRAP_WOOD)
+	for x in [-4.5, 0.5, 4.5]:
+		draw_line(center + Vector2(x, -11), center + Vector2(x, 11), TRAP_GRAIN, 1.0)
+	draw_rect(base, TRAP_WOOD_EDGE, false, 1.5)
+	# The hinge: a rod across the middle with a coiled spring at each end.
+	draw_line(center + Vector2(-7, 0), center + Vector2(7, 0), STEEL_EDGE, 2.0)
+	for side in [-1, 1]:
+		draw_circle(center + Vector2(5.5 * side, 0), 2.2, STEEL)
+		draw_circle(center + Vector2(5.5 * side, 0), 2.2, STEEL_EDGE, false, 1.0, true)
+	if snapped:
+		return
+	var pedal := Rect2(center + Vector2(-3.5, 4), Vector2(7, 6))
+	draw_rect(pedal, CHEESE)
+	draw_rect(pedal, CHEESE_HOLE, false, 1.0)
+	draw_circle(center + Vector2(1, 7.5), 1.0, CHEESE_HOLE)
+	_draw_steel(_offset(PackedVector2Array([Vector2(0, -10), Vector2(0, 5)]), center), 1.0)
+	var bar := PackedVector2Array([Vector2(-5.5, 0), Vector2(-5.5, -10), Vector2(5.5, -10), Vector2(5.5, 0)])
+	_draw_steel(_offset(bar, center), 1.5)
+
+
+## Draws a shiny steel wire with a dark outline so it stands out on wood and fur.
+func _draw_steel(points: PackedVector2Array, width: float) -> void:
+	draw_polyline(points, STEEL_EDGE, width + 2.0, true)
+	draw_polyline(points, STEEL, width, true)
+
+
+func _offset(points: PackedVector2Array, by: Vector2) -> PackedVector2Array:
+	var result := PackedVector2Array()
+	for point in points:
+		result.append(point + by)
+	return result
 
 
 ## Draws a top-down mouse facing up, rotated to the direction it last moved.

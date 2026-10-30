@@ -11,9 +11,11 @@ var rng_seed := 1
 var main: Node
 var board: Board
 
-## Turns each finished round took.
+## Turns each round that reached the cheese took.
 var round_turns: Array[int] = []
 var unfinished := 0
+## Rounds lost to a mouse trap.
+var caught := 0
 ## Per effect: [times rolled, times the bot used it, total cells gained on those turns, winning turns].
 var effect_stats := {}
 ## Cells gained per turn and turn count on turns where cards went only into plain slots.
@@ -62,7 +64,7 @@ func _play_round() -> void:
 		for slot: CardSlot in main.slots:
 			effect_stats[slot.effect][0] += 1
 		await main.lock_in()
-		var won: bool = main.win_panel.visible
+		var won: bool = main.win_panel.visible and not board.is_caught()
 		var gain := before - _distance()
 		if used.is_empty() and placed > 0:
 			plain_gain += gain
@@ -73,14 +75,19 @@ func _play_round() -> void:
 			stats[2] += gain
 			if won:
 				stats[3] += 1
-	round_turns.append(main.turn)
+	if board.is_caught():
+		caught += 1
+	else:
+		round_turns.append(main.turn)
 
 
 ## Greedy bot: for each slot in play order, places the card that brings the mouse closest to the cheese,
-## and only if it gets closer. Ignores distance effects. Returns the effects of the slots it used.
+## and only if it gets closer. Ignores distance effects. Never steps straight onto a trap; if one is in
+## the way and nothing else gets closer, it sidesteps. Returns the effects of the slots it used.
 func _place_cards() -> Array[CardSlot.Effect]:
 	var used: Array[CardSlot.Effect] = []
 	var pos := board.mouse_cell
+	var trap_in_way := false
 	placed = 0
 	for slot: CardSlot in main._play_order():
 		if slot.effect == CardSlot.Effect.BLOCKED:
@@ -93,7 +100,9 @@ func _place_cards() -> Array[CardSlot.Effect]:
 				dir = _best_dir(pos)
 				slot.wild_dir = dir
 			var cell := _clamp(pos + Card.OFFSETS[slot.play_dir(dir)])
-			if _dist(cell) < _dist(best_cell):
+			if cell in board.traps:
+				trap_in_way = trap_in_way or _dist(cell) < _dist(pos)
+			elif _dist(cell) < _dist(best_cell):
 				best = card
 				best_cell = cell
 		if best:
@@ -102,7 +111,25 @@ func _place_cards() -> Array[CardSlot.Effect]:
 			placed += 1
 			if slot.effect != CardSlot.Effect.NONE:
 				used.append(slot.effect)
+	if placed == 0 and trap_in_way:
+		_sidestep(pos, used)
 	return used
+
+
+## Puts the first card that moves the mouse without hitting a trap into the first open slot.
+func _sidestep(pos: Vector2i, used: Array[CardSlot.Effect]) -> void:
+	for slot: CardSlot in main._play_order():
+		if slot.effect == CardSlot.Effect.BLOCKED:
+			continue
+		for card: Card in main.hand_box.get_children():
+			var cell := _clamp(pos + Card.OFFSETS[slot.play_dir(card.dir)])
+			if cell != pos and cell not in board.traps:
+				main._place_in_slot(card, slot)
+				placed += 1
+				if slot.effect != CardSlot.Effect.NONE:
+					used.append(slot.effect)
+				return
+		return
 
 
 func _best_dir(pos: Vector2i) -> Card.Dir:
@@ -133,6 +160,7 @@ func _report() -> void:
 		total += t
 	var n := sorted.size()
 	print("\nBalance sim: %d rounds, seed %d, greedy bot" % [rounds, rng_seed])
+	print("Caught in a trap: %d rounds (%.1f%%)" % [caught, 100.0 * caught / max(rounds, 1)])
 	if n == 0:
 		print("No rounds finished.")
 		return
