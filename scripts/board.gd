@@ -18,6 +18,8 @@ const FUR := Color("9a9a9e")
 const FUR_DARK := Color("7d7d82")
 const PINK := Color("f2a6b3")
 
+## When false, moves finish instantly instead of tweening (used by the headless balance sim).
+var animate := true
 var mouse_cell := Vector2i.ZERO
 var cheese_cell := Vector2i.ZERO
 var facing: Card.Dir = Card.Dir.UP
@@ -64,8 +66,7 @@ func step(dir: Card.Dir, wrap := false) -> bool:
 		var bump := Vector2(mouse_cell) + Vector2(offset) * 0.25
 		tween.tween_property(self, "mouse_pos", bump, STEP_TIME / 2)
 		tween.tween_property(self, "mouse_pos", Vector2(mouse_cell), STEP_TIME / 2)
-	await tween.finished
-	return mouse_cell == cheese_cell
+	return await _finish(tween)
 
 
 ## Moves the mouse in a straight line until it hits a wall or reaches the cheese.
@@ -80,8 +81,7 @@ func slide(dir: Card.Dir) -> bool:
 		cells += 1
 	var tween := create_tween().set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	tween.tween_property(self, "mouse_pos", Vector2(mouse_cell), SLIDE_CELL_TIME * cells + STEP_TIME)
-	await tween.finished
-	return mouse_cell == cheese_cell
+	return await _finish(tween)
 
 
 ## Hops the mouse by offset, passing over the cells in between. Lands as far as the walls allow.
@@ -91,7 +91,17 @@ func jump(offset: Vector2i, dir: Card.Dir) -> bool:
 	var tween := create_tween().set_parallel()
 	tween.tween_property(self, "mouse_pos", Vector2(mouse_cell), JUMP_TIME)
 	tween.tween_method(func(t: float) -> void: hop = sin(t * PI) * HOP_HEIGHT, 0.0, 1.0, JUMP_TIME)
-	await tween.finished
+	return await _finish(tween)
+
+
+## Waits for a move's tween, or skips it when not animating. Returns true if on the cheese.
+func _finish(tween: Tween) -> bool:
+	if animate:
+		await tween.finished
+	else:
+		tween.kill()
+		mouse_pos = Vector2(mouse_cell)
+		hop = 0.0
 	return mouse_cell == cheese_cell
 
 

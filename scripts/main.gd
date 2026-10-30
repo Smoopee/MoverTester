@@ -172,7 +172,8 @@ func _play(slot: CardSlot, card: Card) -> bool:
 			if _distance(board.mouse_cell + offset, board.cheese_cell) >= now:
 				card.modulate = FIZZLED
 				status_label.text = "Sniff: %s isn't toward the cheese, so the mouse stays put." % Card.NAMES[dir]
-				await get_tree().create_timer(Board.STEP_TIME * 2).timeout
+				if board.animate:
+					await get_tree().create_timer(Board.STEP_TIME * 2).timeout
 				return false
 	return await _steps(dir, 1)
 
