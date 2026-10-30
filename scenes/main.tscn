@@ -113,11 +113,6 @@ layout_mode = 2
 theme_override_colors/font_color = Color(0.878, 0.345, 0.29, 1)
 autowrap_mode = 3
 
-[node name="SlotsTitle" type="Label" parent="Margin/Layout/Side"]
-layout_mode = 2
-modulate = Color(1, 1, 1, 0.7)
-text = "Play order (left to right)"
-
 [node name="SlotRow" type="HBoxContainer" parent="Margin/Layout/Side"]
 unique_name_in_owner = true
 layout_mode = 2
