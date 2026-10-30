@@ -38,4 +38,5 @@ Godot 4.6 is at `C:\Program Files\Godot\godot.exe` (the `*_console.exe` launcher
 ```
 
 A PostToolUse hook (`.claude/hooks/godot-check.ps1`) parse-checks every `.gd` file Claude edits.
-Skills: `add-card-effect`, `balance-sim`. Agents: `gdscript-reviewer`, `card-designer`.
+Skills: `add-card-effect`, `balance-sim`, `ship` (user-only: commit → PR → merge). Agents:
+`gdscript-reviewer`, `card-designer`.
