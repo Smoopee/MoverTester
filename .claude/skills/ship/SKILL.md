@@ -30,7 +30,18 @@ for f in $(git ls-files 'scripts/*.gd' 'tools/*.gd'; git ls-files --others --exc
 ```
 The sim must finish with `unfinished 0`. Put its mean turns-to-cheese in the PR body.
 
-## 3. Branch and commit
+## 3. Keep CLAUDE.md current
+Read `CLAUDE.md` and check it against the diff being shipped. It needs an edit when the change:
+- adds, renames or removes a file under `scripts/`, `tools/` or `scenes/`, or changes what one is for;
+- adds or renames a `%Unique` node the code uses, or a method the Layout section names;
+- adds, renames or removes a skill, agent or hook under `.claude/`;
+- changes a command, the Godot path, or a convention (typing, drawing in code, `Board.animate`, ...).
+
+Fix only the lines that are now wrong or missing, in the file's existing terse style. Don't list
+individual effects or tuning values, and don't add a changelog. Ship the edit in the same commit. If
+nothing needs changing, leave the file alone.
+
+## 4. Branch and commit
 - On `main`: create a branch named after the change (kebab-case, e.g. `add-teleport-effect`) with
   `git checkout -b <name>`. Otherwise stay on the current branch.
 - Stage the specific files (not `git add -A`), then commit with a short imperative subject and a few
@@ -38,7 +49,7 @@ The sim must finish with `unfinished 0`. Put its mean turns-to-cheese in the PR 
   `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`
 - Commits already on the branch are shipped as they are; don't rewrite them.
 
-## 4. Push and open the PR
+## 5. Push and open the PR
 ```bash
 git fetch origin && git merge-base --is-ancestor origin/main HEAD || git merge origin/main
 ```
@@ -49,12 +60,13 @@ git push -u origin HEAD
 Open the PR with `gh pr create --base main --title "<title>" --body-file <file>`, writing the body to a
 file in the scratchpad. The body has:
 - **Summary** — 2–4 bullets of what changed and why.
-- **Checks** — parse check passed for N scripts; sim mean turns to cheese.
+- **Checks** — parse check passed for N scripts; sim mean turns to cheese; CLAUDE.md updated (what
+  changed) or already current.
 - Last line: `🤖 Generated with [Claude Code](https://claude.com/claude-code)`
 
 If a PR for this branch already exists (`gh pr view` succeeds), reuse it and update its body.
 
-## 5. Merge
+## 6. Merge
 - `gh pr view --json mergeable,mergeStateStatus,statusCheckRollup`. The repo has no CI today, so an
   empty check list is fine. Stop if any check failed or is pending, or if `mergeable` is `CONFLICTING`.
 - Merge with a merge commit (how the repo's PRs are merged) and delete the remote branch:
@@ -62,7 +74,7 @@ If a PR for this branch already exists (`gh pr view` succeeds), reuse it and upd
 gh pr merge --merge --delete-branch
 ```
 
-## 6. Sync and report
+## 7. Sync and report
 ```bash
 git checkout main && git pull --ff-only origin main
 ```
