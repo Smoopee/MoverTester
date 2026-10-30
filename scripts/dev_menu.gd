@@ -110,9 +110,10 @@ func _process(_delta: float) -> void:
 	var run := game.run
 	var board := game.board
 	var distance := absi(board.mouse_cell.x - board.cheese_cell.x) + absi(board.mouse_cell.y - board.cheese_cell.y)
-	_readout.text = "Round %d, turn %d, boss %s, %d beaten\nMouse %s, cheese %s, distance %d, %d traps, %d cats" % [
-		run.round_number, game.turn, Boss.INFO[run.boss][0] if run.boss != -1 else "-", run.bosses_beaten,
-		board.mouse_cell, board.cheese_cell, distance, board.traps.size(), board.cats.size()]
+	_readout.text = "Round %d, turn %d of %d, boss %s, %d beaten\n%dx%d board, mouse %s, cheese %s, distance %d, %d traps, %d cats" % [
+		run.round_number, game.turn, game.turn_limit, Boss.INFO[run.boss][0] if run.boss != -1 else "-",
+		run.bosses_beaten, board.grid, board.grid, board.mouse_cell, board.cheese_cell, distance,
+		board.traps.size(), board.cats.size()]
 	if _next_boss.selected != run.next_boss:
 		_next_boss.select(run.next_boss)
 	_invincible.set_pressed_no_signal(board.invincible)
@@ -166,6 +167,11 @@ func _build_run_tab(box: VBoxContainer) -> void:
 	_label(row, "Round number")
 	_button(row, "-1", _add_round.bind(-1))
 	_button(row, "+1", _add_round.bind(1))
+	row = _row(box)
+	_label(row, "Turn limit")
+	_button(row, "-1", _add_turns.bind(-1))
+	_button(row, "+1", _add_turns.bind(1))
+	_button(row, "+10", _add_turns.bind(10))
 
 	_heading(box, "Bosses")
 	row = _row(box)
@@ -406,13 +412,20 @@ func _play_boss(kind: int) -> void:
 func _add_round(by: int) -> void:
 	game.run.round_number = maxi(game.run.round_number + by, 1)
 	game.refresh_ui()
-	_did("Round number %d" % game.run.round_number)
+	_did("Round number %d (Restart round for its board: %s)" % [game.run.round_number,
+		Difficulty.describe(game.run.round_number)])
+
+
+## Moves this round's last turn, though never before the turn being played.
+func _add_turns(by: int) -> void:
+	game.turn_limit = maxi(game.turn_limit + by, game.turn)
+	game.refresh_ui()
+	_did("Turn limit %d" % game.turn_limit)
 
 
 func _add_bosses_beaten(by: int) -> void:
 	game.run.bosses_beaten = maxi(game.run.bosses_beaten + by, 0)
-	_did("Bosses beaten %d: rounds from the next one have %d traps and %d cats" % [
-		game.run.bosses_beaten, game._trap_count(), game._cat_count()])
+	_did("Bosses beaten %d" % game.run.bosses_beaten)
 
 
 func _open_shop(free_trinket: bool) -> void:

@@ -15,9 +15,14 @@ a greedy bot, so it always tests the current rules. 500 rounds take a few second
 - `--rounds N` (default 500); `--seed S` (default 1). The same seed gives the same output, so for a
   before/after comparison keep the seed and change one thing. Then check that the conclusion holds
   with 2–3 other seeds.
+- Runs go on until the bot loses (caught, or out of turns), so rounds climb the difficulty curve in
+  `scripts/difficulty.gd`: bigger boards, more traps and cats, fewer spare turns.
+- `--round N` plays every round as round N of a fresh run, to test one point on the curve with
+  enough rounds to trust.
 - `--boss NAME` (`alley_king`, `runaway_cheese`, `kitchen_light`) makes every round that boss, each
-  on a fresh run. Without it boss rounds are off, so the default output is plain rounds only. Compare
-  a boss's caught / out-of-time rates against a plain run with the same seed.
+  on a fresh run. Without it boss rounds are off, so the default output is plain rounds only. Pair it
+  with `--round N` and compare a boss's caught / out-of-time rates against a plain run of that round
+  with the same seed.
 - Script errors print as `SCRIPT ERROR`. Fix them before reading any numbers.
 
 ## The bot
@@ -28,6 +33,11 @@ baseline player, not a good one, so effects that reward planning (ECHO, DIAGONAL
 setups) look weaker here than they are for humans.
 
 ## Reading the output
+- **Caught / out of time:** share of all rounds lost to a trap, a cat, or the turn limit.
+- **Round table:** one row per round number reached: its board, how many times it was played, and
+  won / trap / cat / time percentages plus mean turns in won rounds. Rounds 1–2 should be near 100%
+  won and the win rate should slide down from there. Late rows have few rounds, so treat them as noise
+  (or check them with `--round N`).
 - **Turns to cheese:** mean, median, max and a histogram. Rounds that hit 200 turns count as
   `unfinished`, which should always be 0. A big tail of 10+ turn rounds means rounds drag on.
 - **Effect table**, one row per effect:
