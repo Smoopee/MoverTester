@@ -4,6 +4,8 @@ A Godot 4.6 deckbuilder prototype. Each turn you draw a hand of direction cards,
 slots, then Lock In: the mouse moves one cell per card, in slot order, on a 20x20 grid until it
 reaches the cheese. Each turn about half the slots roll an **effect** (REVERSED, SLIDE, ECHO, BURN, ...)
 that changes how the card in that slot plays. Slot effects are where the game's content lives.
+Each round also gives `DISCARDS_PER_ROUND` (5) discards: right-click a card, or drag it onto the
+Discard button, to swap it for a new draw (`main.gd` `discard_card`).
 
 ## Layout
 - `scenes/main.tscn` — the only scene. Nodes the code uses are `%Unique` names (`%Board`, `%Hand`,

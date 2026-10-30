@@ -7,6 +7,8 @@ const MIN_CHEESE_DISTANCE := 8
 const TRAP_COUNT := 8
 ## Chance that a slot gets an effect each turn.
 const EFFECT_CHANCE := 0.5
+## Cards the player can swap for a new draw each round.
+const DISCARDS_PER_ROUND := 5
 const HINT := "Click a card to put it in the next slot, or drag it to a slot. Then Lock In."
 const PLAYING := Color(1.15, 1.15, 0.8)
 const PLAYED := Color(1, 1, 1, 0.45)
@@ -19,6 +21,7 @@ const FIZZLED := Color(1, 0.5, 0.5, 0.6)
 @onready var slot_row: HBoxContainer = %SlotRow
 @onready var effects_label: Label = %EffectsLabel
 @onready var hand_box: HBoxContainer = %Hand
+@onready var discard_card_button: Button = %DiscardCardButton
 @onready var lock_in_button: Button = %LockInButton
 @onready var status_label: Label = %StatusLabel
 @onready var win_panel: Control = %WinPanel
@@ -30,6 +33,7 @@ var pile_viewer := PileViewer.new()
 var slots: Array[CardSlot] = []
 var turn := 1
 var busy := false
+var discards_left := DISCARDS_PER_ROUND
 ## Cards played from RECYCLE slots, returned to the next hand.
 var recycled: Array[int] = []
 ## Direction of the last step this turn, for ECHO. -1 before the first one.
@@ -48,6 +52,9 @@ func _ready() -> void:
 		slot_row.add_child(column)
 		slots.append(slot)
 	hand_box.set_drag_forwarding(Callable(), _can_drop_on_hand, _drop_on_hand)
+	discard_card_button.set_drag_forwarding(Callable(), _can_drop_on_discard, _drop_on_discard)
+	discard_card_button.pressed.connect(func() -> void:
+		status_label.text = "Drag a card onto Discard, or right-click it, to swap it for a new one.")
 	lock_in_button.pressed.connect(lock_in)
 	new_round_button.pressed.connect(new_round)
 	draw_pile_button.pressed.connect(_view_pile.bind("Draw pile", deck.draw_pile))
@@ -71,6 +78,7 @@ func new_round() -> void:
 	board.place(mouse, cheese, traps)
 	BugReport.note("New round: mouse %s, cheese %s, traps %s" % [mouse, cheese, traps])
 	turn = 1
+	discards_left = DISCARDS_PER_ROUND
 	win_panel.hide()
 	pile_viewer.hide()
 	start_turn()
@@ -82,11 +90,7 @@ func start_turn() -> void:
 	dirs.append_array(deck.draw(HAND_SIZE - recycled.size()))
 	recycled.clear()
 	for dir in dirs:
-		var card := Card.new()
-		card.dir = dir as Card.Dir
-		card.pressed.connect(_on_card_clicked.bind(card))
-		card.card_dropped_on.connect(_on_card_dropped_on_card.bind(card))
-		hand_box.add_child(card)
+		hand_box.add_child(_make_card(dir))
 	BugReport.note("Turn %d: hand %s" % [turn, _dir_names(dirs)])
 	_roll_effects()
 	status_label.text = HINT
@@ -101,6 +105,7 @@ func lock_in() -> void:
 	lock_in_button.disabled = true
 	draw_pile_button.disabled = true
 	discard_button.disabled = true
+	discard_card_button.disabled = true
 	status_label.text = "Moving..."
 	for card in _all_cards():
 		card.disabled = true
@@ -259,6 +264,39 @@ func _roll_effects() -> void:
 	BugReport.note("Effects: %s" % _slot_effects())
 
 
+## Swaps a card in the hand or a slot for a new draw, using up one of the round's discards.
+## The new card goes to the hand, in the old card's place if it came from there.
+func discard_card(card: Card) -> void:
+	if busy or discards_left == 0:
+		return
+	# Draw before discarding so the card can't be reshuffled straight back into the hand.
+	var drawn := deck.draw(1)
+	if drawn.is_empty():
+		status_label.text = "No cards left to draw."
+		return
+	discards_left -= 1
+	deck.discard([card.dir])
+	var new_card := _make_card(drawn[0])
+	hand_box.add_child(new_card)
+	if card.get_parent() == hand_box:
+		hand_box.move_child(new_card, card.get_index())
+	card.get_parent().remove_child(card)
+	card.queue_free()
+	BugReport.note("Discarded %s, drew %s (%d discards left)" % [
+		Card.NAMES[card.dir], Card.NAMES[new_card.dir], discards_left])
+	status_label.text = "Discarded %s, drew %s." % [Card.NAMES[card.dir], Card.NAMES[new_card.dir]]
+	_refresh_hud()
+
+
+func _make_card(dir: int) -> Card:
+	var card := Card.new()
+	card.dir = dir as Card.Dir
+	card.pressed.connect(_on_card_clicked.bind(card))
+	card.card_dropped_on.connect(_on_card_dropped_on_card.bind(card))
+	card.discard_requested.connect(discard_card.bind(card))
+	return card
+
+
 func _on_card_clicked(card: Card) -> void:
 	if busy:
 		return
@@ -300,6 +338,14 @@ func _can_drop_on_hand(_at_position: Vector2, data: Variant) -> bool:
 	return data is Card and not busy
 
 
+func _can_drop_on_discard(_at_position: Vector2, data: Variant) -> bool:
+	return data is Card and not busy and discards_left > 0
+
+
+func _drop_on_discard(_at_position: Vector2, data: Variant) -> void:
+	discard_card(data)
+
+
 func _drop_on_hand(_at_position: Vector2, data: Variant) -> void:
 	data.reparent(hand_box, false)
 	BugReport.note("%s -> hand" % Card.NAMES[data.dir])
@@ -333,7 +379,9 @@ func _clear_cards() -> void:
 func _refresh_hud() -> void:
 	hud_label.text = "Turn %d" % turn
 	draw_pile_button.text = "Draw pile: %d" % deck.draw_pile.size()
-	discard_button.text = "Discard: %d" % deck.discard_pile.size()
+	discard_button.text = "Discard pile: %d" % deck.discard_pile.size()
+	discard_card_button.text = "Discard (%d left)" % discards_left
+	discard_card_button.disabled = busy or discards_left == 0
 
 
 func _view_pile(title: String, dirs: Array[int]) -> void:
@@ -347,7 +395,8 @@ func _bug_report_state() -> String:
 	var outcome := ""
 	if win_panel.visible:
 		outcome = "  (caught)" if board.is_caught() else "  (won)"
-	lines.append("Turn %d%s%s" % [turn, "  (moving)" if busy else "", outcome])
+	lines.append("Turn %d%s%s, %d discards left" % [turn, "  (moving)" if busy else "", outcome,
+		discards_left])
 	lines.append("Mouse %s facing %s, cheese %s, distance %d" % [board.mouse_cell,
 		Card.NAMES[board.facing], board.cheese_cell, _distance(board.mouse_cell, board.cheese_cell)])
 	lines.append("Traps: %s" % [board.traps])

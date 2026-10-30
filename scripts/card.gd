@@ -1,8 +1,10 @@
 class_name Card
 extends Button
-## A movement card. Click it to move it between the hand and the slots, or drag it.
+## A movement card. Click it to move it between the hand and the slots, or drag it. Right-click it to
+## discard it.
 
 signal card_dropped_on(card: Card)
+signal discard_requested
 
 enum Dir { UP, DOWN, LEFT, RIGHT }
 
@@ -58,6 +60,13 @@ func _draw() -> void:
 	draw_set_transform(Vector2.ZERO)
 	draw_string(get_theme_default_font(), Vector2(0, size.y - 12), NAMES[dir],
 			HORIZONTAL_ALIGNMENT_CENTER, size.x, 14, color.darkened(0.25))
+
+
+func _gui_input(event: InputEvent) -> void:
+	var button := event as InputEventMouseButton
+	if button and button.button_index == MOUSE_BUTTON_RIGHT and button.pressed and not disabled:
+		accept_event()
+		discard_requested.emit()
 
 
 func _get_drag_data(_at_position: Vector2) -> Variant:
