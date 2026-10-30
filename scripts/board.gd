@@ -1,6 +1,9 @@
 class_name Board
 extends Control
-## The grid, the mouse, the cheese and the mouse traps, all drawn in code.
+## The grid, the mouse, the cheese, the mouse traps and the crumbs, all drawn in code.
+
+## The mouse picked up the crumb on this cell.
+signal crumb_collected(cell: Vector2i)
 
 const GRID := 20
 const CELL := 30
@@ -30,6 +33,8 @@ var mouse_cell := Vector2i.ZERO
 var cheese_cell := Vector2i.ZERO
 ## Cells with a mouse trap. Moving onto one loses the round; jumping over one is safe.
 var traps: Array[Vector2i] = []
+## Cells with a crumb for the shop. Walking or sliding over one picks it up; jumping over one doesn't.
+var crumbs: Array[Vector2i] = []
 var facing: Card.Dir = Card.Dir.UP
 ## Mouse position in cell units; tweened between cells so the move is animated.
 var mouse_pos := Vector2.ZERO:
@@ -47,12 +52,19 @@ func _ready() -> void:
 	custom_minimum_size = Vector2(GRID * CELL, GRID * CELL)
 
 
-func place(mouse: Vector2i, cheese: Vector2i, trap_cells: Array[Vector2i] = []) -> void:
+func place(mouse: Vector2i, cheese: Vector2i, trap_cells: Array[Vector2i] = [],
+		crumb_cells: Array[Vector2i] = []) -> void:
 	mouse_cell = mouse
 	cheese_cell = cheese
 	traps = trap_cells
+	crumbs = crumb_cells
 	facing = Card.Dir.UP
 	mouse_pos = Vector2(mouse)
+
+
+func remove_trap(cell: Vector2i) -> void:
+	traps.erase(cell)
+	queue_redraw()
 
 
 ## Moves the mouse one cell (bumping off walls, or coming in on the opposite side if wrap is set).
@@ -84,13 +96,13 @@ func slide(dir: Card.Dir) -> bool:
 	if not _in_bounds(mouse_cell + offset):
 		return await step(dir)
 	facing = dir
-	var cells := 0
+	var passed: Array[Vector2i] = []
 	while _in_bounds(mouse_cell + offset) and mouse_cell != cheese_cell and not is_caught():
 		mouse_cell += offset
-		cells += 1
+		passed.append(mouse_cell)
 	var tween := create_tween().set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	tween.tween_property(self, "mouse_pos", Vector2(mouse_cell), SLIDE_CELL_TIME * cells + STEP_TIME)
-	return await _finish(tween)
+	tween.tween_property(self, "mouse_pos", Vector2(mouse_cell), SLIDE_CELL_TIME * passed.size() + STEP_TIME)
+	return await _finish(tween, passed)
 
 
 ## Hops the mouse by offset, passing over the cells in between. Lands as far as the walls allow.
@@ -108,15 +120,22 @@ func is_caught() -> bool:
 	return mouse_cell in traps
 
 
-## Waits for a move's tween, or skips it when not animating. Returns true if the round is over:
-## the mouse is on the cheese or caught in a trap.
-func _finish(tween: Tween) -> bool:
+## Waits for a move's tween, or skips it when not animating, then picks up any crumbs on the cells
+## passed and the cell landed on. Returns true if the round is over: the mouse is on the cheese or
+## caught in a trap.
+func _finish(tween: Tween, passed: Array[Vector2i] = []) -> bool:
 	if animate:
 		await tween.finished
 	else:
 		tween.kill()
 		mouse_pos = Vector2(mouse_cell)
 		hop = 0.0
+	passed.append(mouse_cell)
+	for cell in passed:
+		if cell in crumbs:
+			crumbs.erase(cell)
+			queue_redraw()
+			crumb_collected.emit(cell)
 	return mouse_cell == cheese_cell or is_caught()
 
 
@@ -131,6 +150,8 @@ func _draw() -> void:
 			draw_rect(Rect2(x * CELL, y * CELL, CELL, CELL), color)
 	draw_rect(Rect2(0, 0, GRID * CELL, GRID * CELL), BORDER, false, 3.0)
 	_draw_cheese(_cell_center(Vector2(cheese_cell)))
+	for crumb in crumbs:
+		_draw_crumb(_cell_center(Vector2(crumb)))
 	# Once the mouse has landed on a trap, that trap has snapped shut.
 	var snapped := is_caught() and mouse_pos == Vector2(mouse_cell)
 	for trap in traps:
@@ -158,6 +179,13 @@ func _draw_cheese(center: Vector2) -> void:
 	draw_circle(center + Vector2(6, 4), 2.5, CHEESE_HOLE)
 	draw_circle(center + Vector2(9, -3), 1.6, CHEESE_HOLE)
 	draw_circle(center + Vector2(0, 6), 1.5, CHEESE_HOLE)
+
+
+## Draws a few loose bits of cheese.
+func _draw_crumb(center: Vector2) -> void:
+	for bit: Array in [[Vector2(-4, 2), 3.2], [Vector2(3, -2), 2.6], [Vector2(2, 5), 2.0]]:
+		draw_circle(center + bit[0], bit[1], CHEESE)
+		draw_circle(center + bit[0], bit[1], CHEESE_HOLE, false, 1.0, true)
 
 
 ## Draws a top-down snap trap: a wooden block with a steel bar cocked back over the top half and a
