@@ -5,6 +5,9 @@ extends Control
 const GRID := 20
 const CELL := 30
 const STEP_TIME := 0.25
+const SLIDE_CELL_TIME := 0.05
+const JUMP_TIME := 0.4
+const HOP_HEIGHT := 14.0
 
 const FLOOR_LIGHT := Color("e9dcc0")
 const FLOOR_DARK := Color("ded0b1")
@@ -23,6 +26,11 @@ var mouse_pos := Vector2.ZERO:
 	set(value):
 		mouse_pos = value
 		queue_redraw()
+## How far the mouse is off the floor, in pixels, while jumping.
+var hop := 0.0:
+	set(value):
+		hop = value
+		queue_redraw()
 
 
 func _ready() -> void:
@@ -36,8 +44,9 @@ func place(mouse: Vector2i, cheese: Vector2i) -> void:
 	mouse_pos = Vector2(mouse)
 
 
-## Moves the mouse one cell (bumping off walls). Returns true if it is on the cheese.
-func step(dir: Card.Dir) -> bool:
+## Moves the mouse one cell (bumping off walls, or coming in on the opposite side if wrap is set).
+## Returns true if it is on the cheese.
+func step(dir: Card.Dir, wrap := false) -> bool:
 	facing = dir
 	var offset: Vector2i = Card.OFFSETS[dir]
 	var target := mouse_cell + offset
@@ -45,10 +54,43 @@ func step(dir: Card.Dir) -> bool:
 	if _in_bounds(target):
 		mouse_cell = target
 		tween.tween_property(self, "mouse_pos", Vector2(target), STEP_TIME)
+	elif wrap:
+		target = Vector2i(posmod(target.x, GRID), posmod(target.y, GRID))
+		mouse_cell = target
+		tween.tween_property(self, "mouse_pos", mouse_pos + Vector2(offset) * 0.5, STEP_TIME / 2)
+		tween.tween_callback(func() -> void: mouse_pos = Vector2(target) - Vector2(offset) * 0.5)
+		tween.tween_property(self, "mouse_pos", Vector2(target), STEP_TIME / 2)
 	else:
 		var bump := Vector2(mouse_cell) + Vector2(offset) * 0.25
 		tween.tween_property(self, "mouse_pos", bump, STEP_TIME / 2)
 		tween.tween_property(self, "mouse_pos", Vector2(mouse_cell), STEP_TIME / 2)
+	await tween.finished
+	return mouse_cell == cheese_cell
+
+
+## Moves the mouse in a straight line until it hits a wall or reaches the cheese.
+func slide(dir: Card.Dir) -> bool:
+	var offset: Vector2i = Card.OFFSETS[dir]
+	if not _in_bounds(mouse_cell + offset):
+		return await step(dir)
+	facing = dir
+	var cells := 0
+	while _in_bounds(mouse_cell + offset) and mouse_cell != cheese_cell:
+		mouse_cell += offset
+		cells += 1
+	var tween := create_tween().set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tween.tween_property(self, "mouse_pos", Vector2(mouse_cell), SLIDE_CELL_TIME * cells + STEP_TIME)
+	await tween.finished
+	return mouse_cell == cheese_cell
+
+
+## Hops the mouse by offset, passing over the cells in between. Lands as far as the walls allow.
+func jump(offset: Vector2i, dir: Card.Dir) -> bool:
+	facing = dir
+	mouse_cell = (mouse_cell + offset).clamp(Vector2i.ZERO, Vector2i(GRID - 1, GRID - 1))
+	var tween := create_tween().set_parallel()
+	tween.tween_property(self, "mouse_pos", Vector2(mouse_cell), JUMP_TIME)
+	tween.tween_method(func(t: float) -> void: hop = sin(t * PI) * HOP_HEIGHT, 0.0, 1.0, JUMP_TIME)
 	await tween.finished
 	return mouse_cell == cheese_cell
 
@@ -64,7 +106,10 @@ func _draw() -> void:
 			draw_rect(Rect2(x * CELL, y * CELL, CELL, CELL), color)
 	draw_rect(Rect2(0, 0, GRID * CELL, GRID * CELL), BORDER, false, 3.0)
 	_draw_cheese(_cell_center(Vector2(cheese_cell)))
-	_draw_mouse(_cell_center(mouse_pos))
+	var center := _cell_center(mouse_pos)
+	if hop > 0.0:
+		draw_colored_polygon(_ellipse(center + Vector2(0, 6), Vector2(9, 4)), Color(0, 0, 0, 0.2))
+	_draw_mouse(center - Vector2(0, hop))
 
 
 func _cell_center(cell: Vector2) -> Vector2:
