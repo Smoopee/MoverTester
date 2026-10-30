@@ -12,8 +12,9 @@ that changes how the card in that slot plays. Slot effects are where the game's 
   (`lock_in` → `_play`), applies deck effects after the turn.
 - `scripts/card_slot.gd` — `CardSlot`: the `Effect` enum, `INFO` (name / description / color per
   effect), and `play_dir()` for effects that change direction.
-- `scripts/board.gd` — `Board`: grid, mouse and cheese drawing; `step` / `slide` / `jump` movement,
-  each returning true when the mouse lands on the cheese.
+- `scripts/board.gd` — `Board`: grid, mouse, cheese and mouse-trap drawing; `step` / `slide` /
+  `jump` movement, each returning true when the round ends (mouse on the cheese, or `is_caught()`
+  on a trap). Jumps only check the landing cell, so they hop over traps.
 - `scripts/card.gd` — `Card`: a direction card (`Card.Dir`), with drag-and-drop.
 - `scripts/deck.gd` — `Deck`: draw and discard piles of `Card.Dir` ints.
 - `scripts/pile_viewer.gd` — `PileViewer`: overlay opened from the HUD's pile buttons that lists a

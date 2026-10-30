@@ -4,6 +4,7 @@ extends Control
 const HAND_SIZE := 6
 const SLOT_COUNT := 4
 const MIN_CHEESE_DISTANCE := 8
+const TRAP_COUNT := 8
 ## Chance that a slot gets an effect each turn.
 const EFFECT_CHANCE := 0.5
 const HINT := "Click a card to put it in the next slot, or drag it to a slot. Then Lock In."
@@ -66,8 +67,9 @@ func new_round() -> void:
 	var cheese := _random_cell()
 	while _distance(mouse, cheese) < MIN_CHEESE_DISTANCE:
 		cheese = _random_cell()
-	board.place(mouse, cheese)
-	BugReport.note("New round: mouse %s, cheese %s" % [mouse, cheese])
+	var traps := _place_traps(mouse, cheese)
+	board.place(mouse, cheese, traps)
+	BugReport.note("New round: mouse %s, cheese %s, traps %s" % [mouse, cheese, traps])
 	turn = 1
 	win_panel.hide()
 	pile_viewer.hide()
@@ -108,9 +110,10 @@ func lock_in() -> void:
 	BugReport.note("Lock in")
 	last_dir = -1
 	var order := _play_order()
-	var reached := false
+	# Set when the mouse reaches the cheese or is caught in a trap.
+	var ended := false
 	var i := 0
-	while i < order.size() and not reached:
+	while i < order.size() and not ended:
 		var slot := order[i]
 		var card := slot.get_card()
 		i += 1
@@ -126,13 +129,13 @@ func lock_in() -> void:
 			var partner_dir := partner_slot.play_dir(partner.dir)
 			var offset: Vector2i = Card.OFFSETS[dir] + Card.OFFSETS[partner_dir]
 			last_dir = partner_dir
-			reached = await board.jump(offset, dir)
+			ended = await board.jump(offset, dir)
 			BugReport.note("  Slot %d DIAGONAL %s + slot %d %s %s -> mouse %s" % [
 				slot.number, Card.NAMES[card.dir], partner_slot.number,
 				CardSlot.INFO[partner_slot.effect][0], Card.NAMES[partner.dir], board.mouse_cell])
 			partner.modulate = PLAYED
 		else:
-			reached = await _play(slot, card)
+			ended = await _play(slot, card)
 			# Facing is the last direction moved, which differs from the card for WILD, GAMBLE, etc.
 			BugReport.note("  Slot %d %s%s -> mouse %s" % [slot.number,
 				" ".join(PackedStringArray([CardSlot.INFO[slot.effect][0], Card.NAMES[card.dir]])).strip_edges(),
@@ -161,9 +164,13 @@ func lock_in() -> void:
 	draw_pile_button.disabled = false
 	discard_button.disabled = false
 
-	if reached:
-		BugReport.note("Found the cheese on turn %d" % turn)
-		win_label.text = "You found the cheese in %d turn%s!" % [turn, "" if turn == 1 else "s"]
+	if ended:
+		if board.is_caught():
+			BugReport.note("Caught in a trap at %s on turn %d" % [board.mouse_cell, turn])
+			win_label.text = "Snap! The mouse ran into a trap on turn %d." % turn
+		else:
+			BugReport.note("Found the cheese on turn %d" % turn)
+			win_label.text = "You found the cheese in %d turn%s!" % [turn, "" if turn == 1 else "s"]
 		win_panel.show()
 		_refresh_hud()
 		return
@@ -171,7 +178,7 @@ func lock_in() -> void:
 	start_turn()
 
 
-## Moves the mouse for one card, following its slot's effect. Returns true if it reached the cheese.
+## Moves the mouse for one card, following its slot's effect. Returns true if the round is over.
 func _play(slot: CardSlot, card: Card) -> bool:
 	var dir := slot.play_dir(card.dir)
 	var offset: Vector2i = Card.OFFSETS[dir]
@@ -337,9 +344,13 @@ func _view_pile(title: String, dirs: Array[int]) -> void:
 ## Snapshot of the round for an F12 bug report.
 func _bug_report_state() -> String:
 	var lines := PackedStringArray()
-	lines.append("Turn %d%s%s" % [turn, "  (moving)" if busy else "", "  (won)" if win_panel.visible else ""])
+	var outcome := ""
+	if win_panel.visible:
+		outcome = "  (caught)" if board.is_caught() else "  (won)"
+	lines.append("Turn %d%s%s" % [turn, "  (moving)" if busy else "", outcome])
 	lines.append("Mouse %s facing %s, cheese %s, distance %d" % [board.mouse_cell,
 		Card.NAMES[board.facing], board.cheese_cell, _distance(board.mouse_cell, board.cheese_cell)])
+	lines.append("Traps: %s" % [board.traps])
 	for slot in slots:
 		var card := slot.get_card()
 		var effect: String = CardSlot.INFO[slot.effect][0]
@@ -376,6 +387,27 @@ func _dir_names(dirs: Array[int]) -> String:
 
 func _random_cell() -> Vector2i:
 	return Vector2i(randi_range(0, Board.GRID - 1), randi_range(0, Board.GRID - 1))
+
+
+## Picks trap cells off the cheese and not next to the mouse's start. No two traps touch, even
+## diagonally, so they can never wall off part of the board.
+func _place_traps(mouse: Vector2i, cheese: Vector2i) -> Array[Vector2i]:
+	var traps: Array[Vector2i] = []
+	for attempt in 1000:
+		if traps.size() == TRAP_COUNT:
+			break
+		var cell := _random_cell()
+		if cell == cheese or _touching(cell, mouse):
+			continue
+		if traps.any(func(trap: Vector2i) -> bool: return _touching(cell, trap)):
+			continue
+		traps.append(cell)
+	return traps
+
+
+## True when the cells are the same or neighbors, including diagonally.
+func _touching(a: Vector2i, b: Vector2i) -> bool:
+	return absi(a.x - b.x) <= 1 and absi(a.y - b.y) <= 1
 
 
 func _distance(a: Vector2i, b: Vector2i) -> int:
