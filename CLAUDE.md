@@ -16,6 +16,8 @@ that changes how the card in that slot plays. Slot effects are where the game's 
   each returning true when the mouse lands on the cheese.
 - `scripts/card.gd` — `Card`: a direction card (`Card.Dir`), with drag-and-drop.
 - `scripts/deck.gd` — `Deck`: draw and discard piles of `Card.Dir` ints.
+- `scripts/pile_viewer.gd` — `PileViewer`: overlay opened from the HUD's pile buttons that lists a
+  pile's cards, sorted by direction so the draw order stays hidden.
 - `scripts/bug_report.gd` — `BugReport`: F12 panel that saves a description, screenshot, game state
   (`main.gd` `_bug_report_state`) and action log to `bug_reports/` (git-ignored). Log notable events
   with `BugReport.note()`.
