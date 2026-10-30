@@ -407,13 +407,23 @@ func _roll_effects() -> void:
 	# Don't burn the deck down below a full hand.
 	if run.deck.draw_pile.size() + run.deck.discard_pile.size() + _all_cards().size() <= HAND_SIZE:
 		pool.erase(CardSlot.Effect.BURN)
+	# Set once an earlier slot plays before this one, so ECHO has a move to repeat.
+	var after_a_move := false
 	for slot in slots:
 		var effect := CardSlot.Effect.NONE
 		if randf() < EFFECT_CHANCE:
-			effect = pool.pick_random()
+			var choices := pool.duplicate()
+			if not after_a_move:
+				choices.erase(CardSlot.Effect.ECHO)
+			# LAST on the final slot changes nothing.
+			if slot == slots[-1]:
+				choices.erase(CardSlot.Effect.LAST)
+			effect = choices.pick_random()
 			# At most one blocked slot per turn.
 			if effect == CardSlot.Effect.BLOCKED:
 				pool.erase(effect)
+		if effect != CardSlot.Effect.LAST and effect != CardSlot.Effect.BLOCKED:
+			after_a_move = true
 		_set_slot_effect(slot, effect)
 	_refresh_effects_label()
 	BugReport.note("Effects: %s" % _slot_effects())

@@ -77,6 +77,9 @@ func _ready() -> void:
 	_number_label.add_theme_font_size_override("font_size", 32)
 	_number_label.modulate = Color(1, 1, 1, 0.3)
 	add_child(_number_label)
+	# An empty header is shorter, so hold every header at a named one's height to keep the slots in line.
+	header.text = INFO[Effect.REVERSED][0]
+	header.custom_minimum_size.y = header.get_combined_minimum_size().y
 	_refresh()
 
 
