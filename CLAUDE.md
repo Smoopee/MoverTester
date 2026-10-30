@@ -56,6 +56,11 @@ out ends the run, see `main.gd` `lost()`). The shop before it names the boss. Be
 - `scripts/bug_report.gd` — `BugReport`: F12 panel that saves a description, screenshot, game state
   (`main.gd` `_bug_report_state`) and action log to `bug_reports/` (git-ignored). Log notable events
   with `BugReport.note()`.
+- `scripts/dev_menu.gd` — `DevMenu`: F2 drawer of dev tools (debug builds only; doesn't pause). Tabs
+  for the run (restart/win/lose round, bosses, shop, speed, invincible), items, cards and slot
+  effects, and a board brush that edits cells on click (`Board.cell_clicked`). It works through the
+  `# Dev menu` methods at the end of `main.gd` and logs every change as `BugReport.note("DEV: ...")`.
+  New game systems should get a dev tool here.
 - `tools/balance_sim.gd` — headless balance simulation (see below).
 
 ## Conventions

@@ -1,3 +1,4 @@
+class_name Main
 extends Control
 ## Game controller: runs a run of rounds, deals hands, handles card placement, and plays locked-in turns.
 
@@ -58,6 +59,8 @@ var recycled: Array[CardData] = []
 var last_dir := -1
 ## Set when KITCHEN LIGHT's turns run out, which ends the run like being caught.
 var out_of_time := false
+## Set when the round ends, so dev menu edits to the board afterwards can't change the outcome.
+var run_over := false
 ## For the balance sim: false turns boss rounds off, and a Boss.Kind here makes every round that boss.
 var bosses_enabled := true
 var force_boss := -1
@@ -90,6 +93,11 @@ func _ready() -> void:
 	var bug_report := BugReport.new()
 	bug_report.get_state = _bug_report_state
 	add_child(bug_report)
+	# True in the editor and debug exports, false in release exports.
+	if OS.is_debug_build():
+		var dev_menu := DevMenu.new()
+		dev_menu.game = self
+		add_child(dev_menu)
 	new_run()
 
 
@@ -124,6 +132,7 @@ func new_round() -> void:
 	BugReport.note("Cats: %s" % _cat_paths())
 	turn = 1
 	out_of_time = false
+	run_over = false
 	discards_left = DISCARDS_PER_ROUND
 	if run.has(Items.Trinket.SPARE_PAWS):
 		discards_left += SPARE_PAWS_DISCARDS
@@ -253,6 +262,7 @@ func lock_in() -> void:
 
 ## Shows how the round ended: crumbs earned and the way to the shop, or the end of the run.
 func _end_round() -> void:
+	run_over = board.is_caught() or out_of_time
 	if out_of_time:
 		BugReport.note("Out of time on turn %d of round %d" % [turn, run.round_number])
 		win_label.text = "Click! The kitchen light came on."
@@ -307,7 +317,7 @@ func _on_win_panel_button() -> void:
 
 ## True when the round ended the run: the mouse was caught, or KITCHEN LIGHT's turns ran out.
 func lost() -> bool:
-	return board.is_caught() or out_of_time
+	return run_over
 
 
 ## If the mouse is on a trap and THICK FUR hasn't been used this round, breaks the trap and returns
@@ -396,13 +406,17 @@ func _roll_effects() -> void:
 			# At most one blocked slot per turn.
 			if effect == CardSlot.Effect.BLOCKED:
 				pool.erase(effect)
-		slot.set_effect(effect)
-		# Rerolling with FRESH BREEZE can block a slot that already has a card.
-		var card := slot.get_card()
-		if card and effect == CardSlot.Effect.BLOCKED:
-			card.reparent(hand_box, false)
+		_set_slot_effect(slot, effect)
 	_refresh_effects_label()
 	BugReport.note("Effects: %s" % _slot_effects())
+
+
+func _set_slot_effect(slot: CardSlot, effect: CardSlot.Effect) -> void:
+	slot.set_effect(effect)
+	# Rerolling with FRESH BREEZE can block a slot that already has a card.
+	var card := slot.get_card()
+	if card and effect == CardSlot.Effect.BLOCKED:
+		card.reparent(hand_box, false)
 
 
 func _refresh_effects_label() -> void:
@@ -431,22 +445,8 @@ func use_consumable(index: int) -> void:
 			BugReport.note("Effects: %s" % _slot_effects())
 			status_label.text = "Calm: no slot effects this turn."
 		Items.Consumable.NEW_PAWS:
-			var hand := _hand_cards()
-			# Only when the piles can refill the whole hand, so BURN can't make it shrink.
-			if hand.is_empty() or run.deck.draw_pile.size() + run.deck.discard_pile.size() < hand.size():
-				status_label.text = "Not enough cards left to swap the whole hand."
+			if not _swap_hand():
 				return
-			# Draw before discarding so the old hand can't be reshuffled straight back in.
-			var drawn := run.deck.draw(hand.size())
-			var old: Array[CardData] = []
-			for card in hand:
-				old.append(card.data)
-				hand_box.remove_child(card)
-				card.queue_free()
-			run.deck.discard(old)
-			for data in drawn:
-				hand_box.add_child(_make_card(data))
-			BugReport.note("  Hand %s -> %s" % [_card_names(old), _card_names(drawn)])
 			status_label.text = "New Paws: a fresh hand."
 		Items.Consumable.CHEESE_BAIT:
 			if board.traps.is_empty():
@@ -463,6 +463,27 @@ func use_consumable(index: int) -> void:
 	BugReport.note("Used %s" % item_name)
 	_refresh_hud()
 	_refresh_pouch()
+
+
+## Swaps the cards in the hand for new draws. Returns false, changing nothing, when the piles can't
+## refill the whole hand, so BURN can't make it shrink.
+func _swap_hand() -> bool:
+	var hand := _hand_cards()
+	if hand.is_empty() or run.deck.draw_pile.size() + run.deck.discard_pile.size() < hand.size():
+		status_label.text = "Not enough cards left to swap the whole hand."
+		return false
+	# Draw before discarding so the old hand can't be reshuffled straight back in.
+	var drawn := run.deck.draw(hand.size())
+	var old: Array[CardData] = []
+	for card in hand:
+		old.append(card.data)
+		hand_box.remove_child(card)
+		card.queue_free()
+	run.deck.discard(old)
+	for data in drawn:
+		hand_box.add_child(_make_card(data))
+	BugReport.note("  Hand %s -> %s" % [_card_names(old), _card_names(drawn)])
+	return true
 
 
 ## Swaps a card in the hand or a slot for a new draw, using up one of the round's discards.
@@ -642,6 +663,103 @@ func _refresh_pouch() -> void:
 func _view_pile(title: String, cards: Array[CardData]) -> void:
 	BugReport.note("Viewed %s" % title.to_lower())
 	pile_viewer.show_pile(title, cards)
+
+
+# Dev menu: shortcuts the F2 DevMenu calls. The menu logs each one with a "DEV:" note.
+
+## Redraws everything that shows the run: the HUD, pouch, trinkets, slot effects and an open shop.
+func refresh_ui() -> void:
+	_refresh_hud()
+	_refresh_pouch()
+	_refresh_trinkets()
+	_refresh_effects_label()
+	if shop.visible:
+		shop.refresh()
+
+
+## Starts this round over on a new board, as the given Boss.Kind, or as a normal round for -1. The
+## round number and the next boss stay the same.
+func restart_round(boss: int) -> void:
+	if busy:
+		return
+	run.round_number -= 1
+	var saved_force := force_boss
+	var saved_enabled := bosses_enabled
+	# With bosses off, -1 means a normal round even on a boss round number.
+	force_boss = boss
+	bosses_enabled = false
+	new_round()
+	force_boss = saved_force
+	bosses_enabled = saved_enabled
+
+
+## Ends the round as a win: the mouse jumps onto the cheese, then the usual payout and the shop.
+func win_round() -> void:
+	if busy or win_panel.visible or shop.visible:
+		return
+	_clear_cards()
+	out_of_time = false
+	board.mouse_cell = board.cheese_cell
+	board.mouse_pos = Vector2(board.cheese_cell)
+	_end_round()
+
+
+## Ends the round with the mouse caught in a trap, which ends the run.
+func lose_round() -> void:
+	if busy or win_panel.visible or shop.visible:
+		return
+	_clear_cards()
+	board.invincible = false
+	if not board.is_caught():
+		board.traps.append(board.mouse_cell)
+		board.queue_redraw()
+	_end_round()
+
+
+func set_slot_effect(index: int, effect: CardSlot.Effect) -> void:
+	if busy:
+		return
+	_set_slot_effect(slots[index], effect)
+	_refresh_effects_label()
+	BugReport.note("Effects: %s" % _slot_effects())
+
+
+func reroll_effects() -> void:
+	if not busy:
+		_roll_effects()
+
+
+## Adds a card to the hand. With keep, it joins the deck for the rest of the run too. Between rounds
+## there's no hand, so only a kept card is added. Returns whether the card went into the hand.
+func add_card(data: CardData, keep: bool) -> bool:
+	if busy:
+		return false
+	if keep:
+		run.deck.cards.append(data)
+		# A stamp picker that's open was built from the old deck.
+		shop.close_picker()
+	if win_panel.visible or shop.visible:
+		return false
+	hand_box.add_child(_make_card(data))
+	return true
+
+
+## Swaps the hand for new cards without using a discard.
+func redraw_hand() -> bool:
+	return not busy and _swap_hand()
+
+
+## Puts the deck back to the starting cards. Mid-round, it also deals a new hand and rerolls the slots.
+func reset_deck() -> void:
+	if busy:
+		return
+	run.deck.new_run()
+	recycled.clear()
+	# A stamp picker that's open holds the old cards, which would take the stamp and the crumbs.
+	shop.close_picker()
+	if not win_panel.visible and not shop.visible:
+		_clear_cards()
+		start_turn()
 
 
 ## Snapshot of the round for an F12 bug report.
