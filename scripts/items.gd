@@ -3,7 +3,7 @@ extends RefCounted
 ## What the shop sells: trinkets (passive for the rest of the run), consumables (held in the pouch,
 ## used once) and card stamps.
 
-enum Trinket { SPARE_PAWS, LUCKY_TAIL, THICK_FUR, CRUMB_MAGNET, PIGGY_BANK }
+enum Trinket { SPARE_PAWS, LUCKY_TAIL, THICK_FUR, CRUMB_MAGNET, PIGGY_BANK, BOUNTIFUL_HARVEST }
 enum Consumable { FRESH_BREEZE, CALM, NEW_PAWS, CHEESE_BAIT, SQUEEZE }
 
 const TRINKET_COLOR := Color("f5c542")
@@ -13,8 +13,9 @@ const TRINKETS := {
 	Trinket.SPARE_PAWS: ["SPARE PAWS", "+2 discards every round.", 6],
 	Trinket.LUCKY_TAIL: ["LUCKY TAIL", "Slots never roll BLOCKED.", 5],
 	Trinket.THICK_FUR: ["THICK FUR", "The first trap each round breaks instead of catching the mouse.", 12],
-	Trinket.CRUMB_MAGNET: ["CRUMB MAGNET", "Crumbs picked up on the board are worth 2.", 6],
+	Trinket.CRUMB_MAGNET: ["CRUMB MAGNET", "After each move, the mouse also picks up crumbs right next to it (up, down, left or right).", 6],
 	Trinket.PIGGY_BANK: ["PIGGY BANK", "Each win pays +1 crumb per 5 you hold (up to +5).", 7],
+	Trinket.BOUNTIFUL_HARVEST: ["BOUNTIFUL HARVEST", "Crumbs picked up on the board are worth +2.", 7],
 }
 ## Name, description and price of each consumable.
 const CONSUMABLES := {

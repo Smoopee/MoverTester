@@ -73,6 +73,9 @@ const CHEESE_STEP_TIME := 0.2
 var animate := true
 ## Dev menu cheat: when true, traps and cats can't catch the mouse.
 var invincible := false
+## Set while the run has CRUMB MAGNET: the mouse also picks up crumbs on the cells next to it
+## (up, down, left, right, not through a wall) wherever a move ends.
+var magnet := false
 ## Cells along each side of the board this round. Set it before placing anything.
 var grid := MAX_GRID:
 	set(value):
@@ -430,8 +433,8 @@ func _settle(tween: Tween) -> void:
 		hop = 0.0
 
 
-## Picks up any crumbs and chests on the cells, and lets a cat on the mouse's cell pounce. Returns
-## true if the round is over.
+## Picks up any crumbs and chests on the cells (and, with the magnet, crumbs next to the mouse), and
+## lets a cat on the mouse's cell pounce. Returns true if the round is over.
 func _arrive(cells: Array[Vector2i]) -> bool:
 	for cell in cells:
 		if cell in crumbs:
@@ -442,6 +445,14 @@ func _arrive(cells: Array[Vector2i]) -> bool:
 			chests.erase(cell)
 			queue_redraw()
 			chest_opened.emit(cell)
+	if magnet:
+		for offset: Vector2i in Card.OFFSETS.values():
+			var cell := mouse_cell + offset
+			if cell in crumbs and _mouse_can_step(mouse_cell, cell):
+				crumbs.erase(cell)
+				queue_redraw()
+				BugReport.note("  CRUMB MAGNET pulled in the crumb at %s" % cell)
+				crumb_collected.emit(cell)
 	var cat := _cat_at(mouse_cell)
 	if cat and not invincible:
 		await _pounce(cat)
