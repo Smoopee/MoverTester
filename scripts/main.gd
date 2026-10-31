@@ -268,16 +268,18 @@ func lock_in() -> void:
 	var played: Array[CardData] = []
 	for card in _all_cards():
 		var slot := card.get_parent() as CardSlot
-		var effect: CardSlot.Effect = slot.effect_for(card) if slot else CardSlot.Effect.NONE
-		match effect:
-			CardSlot.Effect.RECYCLE:
-				recycled.append(card.data)
-			CardSlot.Effect.BURN:
-				pass
-			CardSlot.Effect.COPY:
-				played.append_array([card.data, card.data.copy()])
-			_:
-				played.append(card.data)
+		# The slot's effect and the card's stamp both apply. A burned card is gone, so nothing recycles it.
+		var effects: Array[CardSlot.Effect] = []
+		if slot:
+			effects = [slot.effect, card.stamp]
+		if CardSlot.Effect.BURN in effects:
+			continue
+		if CardSlot.Effect.RECYCLE in effects:
+			recycled.append(card.data)
+		else:
+			played.append(card.data)
+		if CardSlot.Effect.COPY in effects:
+			played.append(card.data.copy())
 	_clear_cards()
 	run.deck.discard(played)
 	busy = false
@@ -365,41 +367,58 @@ func _survive_trap() -> bool:
 	return true
 
 
-## Moves the mouse for one card, following its slot's effect, or the card's stamp in a plain slot.
-## Returns true if the round is over.
+## Moves the mouse for one card: its slot's effect plays first, then the card's stamp. When both
+## move the mouse (a BURN slot and a SLIDE stamp), it makes both moves, in that order. When neither
+## does, it steps once. Returns true if the round is over.
 func _play(slot: CardSlot, card: Card) -> bool:
 	var dir := slot.play_dir(card.dir)
-	var offset: Vector2i = Card.OFFSETS[dir]
-	match slot.effect_for(card):
+	var moved := false
+	for effect: CardSlot.Effect in [slot.effect, card.stamp]:
+		match effect:
+			CardSlot.Effect.DOUBLE, CardSlot.Effect.GAMBLE, CardSlot.Effect.BURN, CardSlot.Effect.LEAP, \
+					CardSlot.Effect.SLIDE, CardSlot.Effect.WRAP:
+				moved = true
+				if await _move(effect, dir):
+					return true
+				if board.stuck:
+					return false
+			CardSlot.Effect.ECHO:
+				if last_dir != -1:
+					if await _steps(last_dir as Card.Dir, 1):
+						return true
+					if board.stuck:
+						return false
+			CardSlot.Effect.SNIFF:
+				var now := _path_distance(board.cheese_cell, board.mouse_cell)
+				if _path_distance(board.cheese_cell, board.step_target(board.mouse_cell, dir)) >= now:
+					card.modulate = FIZZLED
+					BugReport.note("  Slot %d SNIFF %s fizzled" % [slot.number, Card.NAMES[dir]])
+					status_label.text = "Sniff: %s isn't toward the cheese, so the mouse stays put." % Card.NAMES[dir]
+					if board.animate:
+						# Not process_always, so it waits while the F12 bug report has the game paused.
+						await get_tree().create_timer(Board.STEP_TIME * 2, false).timeout
+					return false
+	if moved:
+		return false
+	return await _steps(dir, 1)
+
+
+## Makes the move of an effect that changes the distance. Returns true if the round is over.
+func _move(effect: CardSlot.Effect, dir: Card.Dir) -> bool:
+	match effect:
 		CardSlot.Effect.DOUBLE:
 			return await _steps(dir, 2)
 		CardSlot.Effect.GAMBLE, CardSlot.Effect.BURN:
 			return await _steps(dir, 3)
 		CardSlot.Effect.LEAP:
 			last_dir = dir
-			return await board.jump(offset * 2, dir)
+			return await board.jump(Card.OFFSETS[dir] * 2, dir)
 		CardSlot.Effect.SLIDE:
 			last_dir = dir
 			return await board.slide(dir)
 		CardSlot.Effect.WRAP:
 			last_dir = dir
 			return await board.step(dir, true)
-		CardSlot.Effect.ECHO:
-			if last_dir != -1:
-				if await _steps(last_dir as Card.Dir, 1):
-					return true
-				if board.stuck:
-					return false
-		CardSlot.Effect.SNIFF:
-			var now := _path_distance(board.cheese_cell, board.mouse_cell)
-			if _path_distance(board.cheese_cell, board.step_target(board.mouse_cell, dir)) >= now:
-				card.modulate = FIZZLED
-				BugReport.note("  Slot %d SNIFF %s fizzled" % [slot.number, Card.NAMES[dir]])
-				status_label.text = "Sniff: %s isn't toward the cheese, so the mouse stays put." % Card.NAMES[dir]
-				if board.animate:
-					# Not process_always, so it waits while the F12 bug report has the game paused.
-					await get_tree().create_timer(Board.STEP_TIME * 2, false).timeout
-				return false
 	return await _steps(dir, 1)
 
 

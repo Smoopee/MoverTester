@@ -96,11 +96,6 @@ func get_card() -> Card:
 	return null
 
 
-## The effect a card plays with here: the slot's own effect, or the card's stamp if the slot has none.
-func effect_for(card: Card) -> Effect:
-	return effect if effect != Effect.NONE else card.stamp
-
-
 ## The direction a card in this slot moves the mouse, after any direction-changing effect.
 func play_dir(card_dir: Card.Dir) -> Card.Dir:
 	var offset: Vector2i = Card.OFFSETS[card_dir]
