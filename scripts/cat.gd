@@ -36,22 +36,23 @@ func covers(at: Vector2i) -> bool:
 
 
 ## Plans this turn's path: mostly straight ahead, sometimes turning, and back the way it came only
-## when boxed in. blocked(cell) says which cells the cat can't walk onto. The path never crosses
-## itself, and stops short if the cat runs out of room. A hunter instead takes the free step closest
-## to target each time, and stops once it's next to it.
-func plan(blocked: Callable, target := Vector2i.ZERO) -> void:
+## when boxed in. blocked(from, to) says whether the cat can't step from a cell onto its neighbor. The
+## path never crosses itself, and stops short if the cat runs out of room. A hunter instead takes the
+## free step closest to its target each time, distance(cell) being the steps from a cell to the
+## target, and stops once it's next to it.
+func plan(blocked: Callable, distance := Callable()) -> void:
 	path.clear()
 	var at := cell
 	var dir := heading
 	for i in steps:
 		var options: Array[Card.Dir] = []
 		if hunter:
-			if _distance(at, target) <= 1:
+			if distance.call(at) <= 1:
 				break
 			options.assign(Card.Dir.values())
 			options.shuffle()
 			options.sort_custom(func(a: Card.Dir, b: Card.Dir) -> bool:
-				return _distance(at + Card.OFFSETS[a], target) < _distance(at + Card.OFFSETS[b], target))
+				return distance.call(at + Card.OFFSETS[a]) < distance.call(at + Card.OFFSETS[b]))
 		else:
 			var sides: Array[Card.Dir] = [_turn(dir, 1), _turn(dir, -1)]
 			sides.shuffle()
@@ -63,7 +64,7 @@ func plan(blocked: Callable, target := Vector2i.ZERO) -> void:
 		var moved := false
 		for option in options:
 			var next: Vector2i = at + Card.OFFSETS[option]
-			if next != cell and next not in path and not blocked.call(next):
+			if next != cell and next not in path and not blocked.call(at, next):
 				path.append(next)
 				at = next
 				dir = option
@@ -73,10 +74,6 @@ func plan(blocked: Callable, target := Vector2i.ZERO) -> void:
 			break
 	heading = dir
 	facing = Card.OFFSETS.find_key(path[0] - cell) as Card.Dir if path else heading
-
-
-static func _distance(a: Vector2i, b: Vector2i) -> int:
-	return absi(a.x - b.x) + absi(a.y - b.y)
 
 
 ## The direction quarter_turns quarter turns clockwise from dir (negative for counterclockwise).

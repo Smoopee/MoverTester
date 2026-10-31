@@ -39,6 +39,8 @@ var plain_gain := 0
 var plain_turns := 0
 ## Cards the bot placed this turn.
 var placed := 0
+## Steps from each cell to the cheese around the walls and traps, refreshed each turn (see _dist).
+var to_cheese: Dictionary[Vector2i, int] = {}
 
 
 func _initialize() -> void:
@@ -111,6 +113,8 @@ func _play_round() -> void:
 			effect_stats[slot.effect][0] += 1
 		await main.lock_in()
 		var won: bool = main.win_panel.visible and not main.lost()
+		# The cheese can have run (RUNAWAY CHEESE).
+		_refresh_distances()
 		var gain := before - _distance()
 		if used.is_empty() and placed > 0:
 			plain_gain += gain
@@ -138,11 +142,12 @@ func _play_round() -> void:
 		crumbs_picked_up += main.round_crumbs
 
 
-## Greedy bot: for each slot in play order, places the card that brings the mouse closest to the cheese,
-## and only if it gets closer. Ignores distance effects. Never steps straight onto a trap, a cat or a
-## cat's path; if one is in the way and nothing else gets closer, it sidesteps. Returns the effects of
-## the slots it used.
+## Greedy bot: for each slot in play order, places the card that brings the mouse closest to the cheese
+## (by the path around the walls), and only if it gets closer. Ignores distance effects. Never steps
+## straight onto a trap, a cat or a cat's path; if one is in the way and nothing else gets closer, it
+## sidesteps. Returns the effects of the slots it used.
 func _place_cards() -> Array[CardSlot.Effect]:
+	_refresh_distances()
 	var used: Array[CardSlot.Effect] = []
 	var pos := board.mouse_cell
 	var trap_in_way := false
@@ -157,7 +162,7 @@ func _place_cards() -> Array[CardSlot.Effect]:
 			if slot.effect == CardSlot.Effect.WILD:
 				dir = _best_dir(pos)
 				slot.wild_dir = dir
-			var cell := _clamp(pos + Card.OFFSETS[slot.play_dir(dir)])
+			var cell := board.step_target(pos, slot.play_dir(dir))
 			if board.is_deadly(cell):
 				trap_in_way = trap_in_way or _dist(cell) < _dist(pos)
 			elif _dist(cell) < _dist(best_cell):
@@ -180,7 +185,7 @@ func _sidestep(pos: Vector2i, used: Array[CardSlot.Effect]) -> void:
 		if slot.effect == CardSlot.Effect.BLOCKED:
 			continue
 		for card: Card in main.hand_box.get_children():
-			var cell := _clamp(pos + Card.OFFSETS[slot.play_dir(card.dir)])
+			var cell := board.step_target(pos, slot.play_dir(card.dir))
 			if cell != pos and not board.is_deadly(cell):
 				main._place_in_slot(card, slot)
 				placed += 1
@@ -193,17 +198,19 @@ func _sidestep(pos: Vector2i, used: Array[CardSlot.Effect]) -> void:
 func _best_dir(pos: Vector2i) -> Card.Dir:
 	var best := Card.Dir.UP
 	for dir: Card.Dir in Card.Dir.values():
-		if _dist(_clamp(pos + Card.OFFSETS[dir])) < _dist(_clamp(pos + Card.OFFSETS[best])):
+		if _dist(board.step_target(pos, dir)) < _dist(board.step_target(pos, best)):
 			best = dir
 	return best
 
 
-func _clamp(cell: Vector2i) -> Vector2i:
-	return cell.clamp(Vector2i.ZERO, Vector2i(board.grid - 1, board.grid - 1))
+func _refresh_distances() -> void:
+	to_cheese = board.distances_from(board.cheese_cell)
 
 
+## Steps from the cell to the cheese, or the straight distance from a cell the path search can't reach
+## (a trap).
 func _dist(cell: Vector2i) -> int:
-	return main._distance(cell, board.cheese_cell)
+	return to_cheese.get(cell, main._distance(cell, board.cheese_cell))
 
 
 func _distance() -> int:
@@ -253,11 +260,13 @@ func _report() -> void:
 func _report_rounds() -> void:
 	var numbers := round_stats.keys()
 	numbers.sort()
-	print("\n%-6s %-28s %6s %6s %6s %6s %6s %6s" % ["Round", "Board", "played", "won%", "trap%",
-		"cat%", "time%", "turns"])
+	# The board goes last: its description grows with the obstacles.
+	print("\n%-6s %6s %6s %6s %6s %6s %6s  %s" % ["Round", "played", "won%", "trap%", "cat%", "time%",
+		"turns", "Board"])
 	for number: int in numbers:
 		var tally: Array = round_stats[number]
 		var played: int = tally[0]
-		print("%-6d %-28s %6d %5.1f%% %5.1f%% %5.1f%% %5.1f%% %6s" % [number, Difficulty.describe(number),
-			played, 100.0 * tally[1] / played, 100.0 * tally[2] / played, 100.0 * tally[3] / played,
-			100.0 * tally[4] / played, "-" if tally[1] == 0 else "%.1f" % (float(tally[5]) / tally[1])])
+		print("%-6d %6d %5.1f%% %5.1f%% %5.1f%% %5.1f%% %6s  %s" % [number, played,
+			100.0 * tally[1] / played, 100.0 * tally[2] / played, 100.0 * tally[3] / played,
+			100.0 * tally[4] / played, "-" if tally[1] == 0 else "%.1f" % (float(tally[5]) / tally[1]),
+			Difficulty.describe(number)])

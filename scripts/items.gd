@@ -4,7 +4,7 @@ extends RefCounted
 ## used once) and card stamps.
 
 enum Trinket { SPARE_PAWS, LUCKY_TAIL, THICK_FUR, CRUMB_MAGNET, PIGGY_BANK }
-enum Consumable { FRESH_BREEZE, CALM, NEW_PAWS, CHEESE_BAIT }
+enum Consumable { FRESH_BREEZE, CALM, NEW_PAWS, CHEESE_BAIT, SQUEEZE }
 
 const TRINKET_COLOR := Color("f5c542")
 const CONSUMABLE_COLOR := Color("6fd6c8")
@@ -22,6 +22,7 @@ const CONSUMABLES := {
 	Consumable.CALM: ["CALM", "Clear every slot effect this turn.", 3],
 	Consumable.NEW_PAWS: ["NEW PAWS", "Swap your whole hand for new cards. Uses no discards.", 3],
 	Consumable.CHEESE_BAIT: ["CHEESE BAIT", "Remove the trap nearest the mouse.", 4],
+	Consumable.SQUEEZE: ["SQUEEZE", "This turn the mouse squeezes through walls.", 3],
 }
 ## Slot effects the shop can stamp onto a card. Only ones that work on a single card with no extra
 ## input: direction effects would just make it another direction card.

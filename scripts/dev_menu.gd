@@ -4,11 +4,21 @@ extends CanvasLayer
 ## the game, so changes show on the board as they're made. Every change is logged with a "DEV:" note,
 ## so a bug report shows when the state was set up by hand. main.gd only adds it in debug builds.
 
-enum Brush { OFF, MOUSE, CHEESE, TRAP, CRUMB, CAT }
+enum Brush { OFF, MOUSE, CHEESE, TRAP, CRUMB, CAT, WALL, GLUE, CONVEYOR, HOLE, FLOORBOARD }
 
 const KEY := KEY_F2
 const WIDTH := 380
-const BRUSH_NAMES := ["Off", "Mouse", "Cheese", "Trap", "Crumb", "Cat"]
+const BRUSH_NAMES := ["Off", "Mouse", "Cheese", "Trap", "Crumb", "Cat", "Wall", "Glue", "Conveyor",
+	"Mouse hole", "Floorboard"]
+## What clicking a cell does with each brush, for the hint under the dropdown.
+const BRUSH_HINTS := {
+	Brush.MOUSE: "moves the mouse there",
+	Brush.CHEESE: "moves the cheese there",
+	Brush.WALL: "adds or removes a wall on the side nearest the click",
+	Brush.CONVEYOR: "adds a conveyor running toward the side nearest the click, or removes one running that way",
+	Brush.HOLE: "adds or removes a mouse hole. Holes link in the order they were added: 1st with 2nd, 3rd with 4th",
+	Brush.FLOORBOARD: "adds a floorboard, breaks one, or clears a gap",
+}
 ## Labels of the speed dropdown. The last one turns animation off.
 const SPEEDS := ["1x", "2x", "4x", "Instant"]
 const SPEED_SCALES := [1.0, 2.0, 4.0]
@@ -110,10 +120,11 @@ func _process(_delta: float) -> void:
 	var run := game.run
 	var board := game.board
 	var distance := absi(board.mouse_cell.x - board.cheese_cell.x) + absi(board.mouse_cell.y - board.cheese_cell.y)
-	_readout.text = "Round %d, turn %d of %d, boss %s, %d beaten\n%dx%d board, mouse %s, cheese %s, distance %d, %d traps, %d cats" % [
+	_readout.text = "Round %d, turn %d of %d, boss %s, %d beaten\n%dx%d board, mouse %s, cheese %s, distance %d (%d by path), %d traps, %d walls, %d cats" % [
 		run.round_number, game.turn, game.turn_limit, Boss.INFO[run.boss][0] if run.boss != -1 else "-",
 		run.bosses_beaten, board.grid, board.grid, board.mouse_cell, board.cheese_cell, distance,
-		board.traps.size(), board.cats.size()]
+		game._path_distance(board.mouse_cell, board.cheese_cell), board.traps.size(), board.walls.size(),
+		board.cats.size()]
 	if _next_boss.selected != run.next_boss:
 		_next_boss.select(run.next_boss)
 	_invincible.set_pressed_no_signal(board.invincible)
@@ -336,9 +347,7 @@ func _build_board_tab(box: VBoxContainer) -> void:
 	brush.item_selected.connect(func(index: int) -> void:
 		_brush = index as Brush
 		_say("" if _brush == Brush.OFF else "Click a cell on the board: %s." % [
-			"moves the mouse there" if _brush == Brush.MOUSE else
-			"moves the cheese there" if _brush == Brush.CHEESE else
-			"adds or removes a %s" % BRUSH_NAMES[_brush].to_lower()]))
+			BRUSH_HINTS.get(_brush, "adds or removes a %s" % BRUSH_NAMES[_brush].to_lower())]))
 	row.add_child(brush)
 	var hint := Label.new()
 	hint.text = "Cats plan new paths after each edit."
@@ -354,6 +363,19 @@ func _build_board_tab(box: VBoxContainer) -> void:
 			game.board.traps.clear()
 			game.board.plan_cats()
 			_did("Cleared the traps"))
+	_button(row, "Walls", func() -> void:
+		if _idle():
+			game.board.walls.clear()
+			game.board.plan_cats()
+			_did("Cleared the walls"))
+	_button(row, "Floor", func() -> void:
+		if _idle():
+			var board := game.board
+			for cell in board.glue + board.conveyors.keys() + board.holes + board.floorboards + board.broken:
+				board.clear_tile(cell)
+			board.stuck = false
+			_did("Cleared the glue, conveyors, mouse holes and floorboards")).tooltip_text = \
+		"Glue, conveyors, mouse holes, floorboards and gaps."
 	_button(row, "Crumbs", func() -> void:
 		if _idle():
 			game.board.crumbs.clear()
@@ -371,11 +393,42 @@ func _build_board_tab(box: VBoxContainer) -> void:
 
 
 ## Edits the board with the brush.
-func _on_cell_clicked(cell: Vector2i) -> void:
+func _on_cell_clicked(cell: Vector2i, side: Card.Dir) -> void:
 	if not _panel.visible or _brush == Brush.OFF or not _idle():
 		return
 	var board := game.board
 	match _brush:
+		Brush.WALL:
+			var other: Vector2i = cell + Card.OFFSETS[side]
+			# The board's edge is already a wall.
+			if not board._in_bounds(other):
+				return
+			var added := board.toggle_wall(cell, other)
+			_did("Wall brush: %s the %s side of %s" % ["walled" if added else "opened", Card.NAMES[side], cell])
+			return
+		Brush.GLUE:
+			var had := cell in board.glue
+			board.clear_tile(cell)
+			if not had:
+				board.glue.append(cell)
+		Brush.CONVEYOR:
+			var had: bool = board.conveyors.get(cell, -1) == side
+			board.clear_tile(cell)
+			if not had:
+				board.conveyors[cell] = side
+		Brush.HOLE:
+			var had := cell in board.holes
+			board.clear_tile(cell)
+			if not had:
+				board.holes.append(cell)
+		Brush.FLOORBOARD:
+			var was_board := cell in board.floorboards
+			var was_gap := cell in board.broken
+			board.clear_tile(cell)
+			if was_board:
+				board.broken.append(cell)
+			elif not was_gap:
+				board.floorboards.append(cell)
 		Brush.MOUSE:
 			board.mouse_cell = cell
 			board.mouse_pos = Vector2(cell)
