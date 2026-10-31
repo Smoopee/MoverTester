@@ -4,12 +4,12 @@ extends CanvasLayer
 ## the game, so changes show on the board as they're made. Every change is logged with a "DEV:" note,
 ## so a bug report shows when the state was set up by hand. main.gd only adds it in debug builds.
 
-enum Brush { OFF, MOUSE, CHEESE, TRAP, CRUMB, CAT, WALL, GLUE, CONVEYOR, HOLE, FLOORBOARD }
+enum Brush { OFF, MOUSE, CHEESE, TRAP, CRUMB, CAT, WALL, GLUE, CONVEYOR, HOLE, FLOORBOARD, CHEST }
 
 const KEY := KEY_F2
 const WIDTH := 380
 const BRUSH_NAMES := ["Off", "Mouse", "Cheese", "Trap", "Crumb", "Cat", "Wall", "Glue", "Conveyor",
-	"Mouse hole", "Floorboard"]
+	"Mouse hole", "Floorboard", "Chest"]
 ## What clicking a cell does with each brush, for the hint under the dropdown.
 const BRUSH_HINTS := {
 	Brush.MOUSE: "moves the mouse there",
@@ -131,7 +131,8 @@ func _process(_delta: float) -> void:
 	for trinket: int in _trinket_boxes:
 		(_trinket_boxes[trinket] as CheckBox).set_pressed_no_signal(run.has(trinket))
 	for i in _slot_effects.size():
-		if _slot_effects[i].selected != game.slots[i].effect:
+		_slot_effects[i].get_parent().visible = i < game.slots.size()
+		if i < game.slots.size() and _slot_effects[i].selected != game.slots[i].effect:
 			_slot_effects[i].select(game.slots[i].effect)
 	if _peeking:
 		var order := run.deck.draw_pile.duplicate()
@@ -178,6 +179,13 @@ func _build_run_tab(box: VBoxContainer) -> void:
 	_label(row, "Round number")
 	_button(row, "-1", _add_round.bind(-1))
 	_button(row, "+1", _add_round.bind(1))
+	row = _row(box)
+	_label(row, "Card slots")
+	_button(row, "-1", _add_slots.bind(-1, 0))
+	_button(row, "+1", _add_slots.bind(1, 0))
+	_label(row, "Hand size")
+	_button(row, "-1", _add_slots.bind(0, -1))
+	_button(row, "+1", _add_slots.bind(0, 1))
 	row = _row(box)
 	_label(row, "Turn limit")
 	_button(row, "-1", _add_turns.bind(-1))
@@ -281,7 +289,8 @@ func _build_items_tab(box: VBoxContainer) -> void:
 
 func _build_cards_tab(box: VBoxContainer) -> void:
 	_heading(box, "Slot effects")
-	for i in game.slots.size():
+	# One row per slot there can be. _process hides the rows past this round's slots.
+	for i in Run.MAX_SLOTS:
 		var row := _row(box)
 		_label(row, "Slot %d" % (i + 1))
 		var dropdown := _effect_dropdown()
@@ -381,6 +390,11 @@ func _build_board_tab(box: VBoxContainer) -> void:
 			game.board.crumbs.clear()
 			game.board.queue_redraw()
 			_did("Cleared the crumbs"))
+	_button(row, "Chests", func() -> void:
+		if _idle():
+			game.board.chests.clear()
+			game.board.queue_redraw()
+			_did("Cleared the chests"))
 	_button(row, "Cats", func() -> void:
 		if _idle():
 			game.board.cats.clear()
@@ -439,6 +453,8 @@ func _on_cell_clicked(cell: Vector2i, side: Card.Dir) -> void:
 			_toggle(board.traps, cell)
 		Brush.CRUMB:
 			_toggle(board.crumbs, cell)
+		Brush.CHEST:
+			_toggle(board.chests, cell)
 		Brush.CAT:
 			var found := board.cats.filter(func(cat: Cat) -> bool: return cat.cell == cell)
 			if found.is_empty():
@@ -467,6 +483,13 @@ func _add_round(by: int) -> void:
 	game.refresh_ui()
 	_did("Round number %d (Restart round for its board: %s)" % [game.run.round_number,
 		Difficulty.describe(game.run.round_number)])
+
+
+## Changes the run's card slots and hand size, as a chest does, and deals a new hand mid-round.
+func _add_slots(slots_by: int, hand_by: int) -> void:
+	if _idle():
+		game.set_slots_and_hand(game.run.slots + slots_by, game.run.hand_size + hand_by)
+		_did("%d card slots, hand size %d" % [game.run.slots, game.run.hand_size])
 
 
 ## Moves this round's last turn, though never before the turn being played.

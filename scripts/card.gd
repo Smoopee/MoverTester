@@ -41,6 +41,8 @@ const ARROW_POINTS: Array[Vector2] = [
 
 ## The deck card this node shows. Set it, or dir, before adding the node to the tree.
 var data := CardData.new()
+## Size of the card. Smaller cards draw everything scaled down. Set it before adding the node to the tree.
+var card_size := CARD_SIZE
 var dir: Dir:
 	get:
 		return data.dir
@@ -52,7 +54,7 @@ var stamp: CardSlot.Effect:
 
 
 func _ready() -> void:
-	custom_minimum_size = CARD_SIZE
+	custom_minimum_size = card_size
 	focus_mode = Control.FOCUS_NONE
 	mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	var color: Color = COLORS[dir]
@@ -67,16 +69,18 @@ func _ready() -> void:
 
 func _draw() -> void:
 	var color: Color = COLORS[dir]
-	draw_set_transform(Vector2(size.x / 2, size.y * 0.42), ANGLES[dir])
+	var zoom := size.x / CARD_SIZE.x
+	draw_set_transform(Vector2(size.x / 2, size.y * 0.42), ANGLES[dir], Vector2.ONE * zoom)
 	draw_colored_polygon(PackedVector2Array(ARROW_POINTS), color)
 	draw_set_transform(Vector2.ZERO)
-	draw_string(get_theme_default_font(), Vector2(0, size.y - 12), NAMES[dir],
-			HORIZONTAL_ALIGNMENT_CENTER, size.x, 14, color.darkened(0.25))
+	draw_string(get_theme_default_font(), Vector2(0, size.y - 12 * zoom), NAMES[dir],
+			HORIZONTAL_ALIGNMENT_CENTER, size.x, maxi(roundi(14 * zoom), 10), color.darkened(0.25))
 	if stamp != CardSlot.Effect.NONE:
 		var info: Array = CardSlot.INFO[stamp]
-		draw_rect(Rect2(3, 3, size.x - 6, 18), info[2])
-		draw_string(get_theme_default_font(), Vector2(0, 16), info[0],
-				HORIZONTAL_ALIGNMENT_CENTER, size.x, 12, Color("2a2420"))
+		var font_size := maxi(roundi(12 * zoom), 9)
+		draw_rect(Rect2(3, 3, size.x - 6, font_size + 6), info[2])
+		draw_string(get_theme_default_font(), Vector2(0, font_size + 4), info[0],
+				HORIZONTAL_ALIGNMENT_CENTER, size.x, font_size, Color("2a2420"))
 
 
 func _gui_input(event: InputEvent) -> void:
@@ -91,7 +95,8 @@ func _get_drag_data(_at_position: Vector2) -> Variant:
 		return null
 	var preview := Card.new()
 	preview.data = data
-	preview.position = -CARD_SIZE / 2
+	preview.card_size = card_size
+	preview.position = -card_size / 2
 	preview.modulate.a = 0.85
 	var holder := Control.new()
 	holder.add_child(preview)

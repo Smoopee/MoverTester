@@ -2,8 +2,15 @@ class_name Main
 extends Control
 ## Game controller: runs a run of rounds, deals hands, handles card placement, and plays locked-in turns.
 
-const HAND_SIZE := 6
-const SLOT_COUNT := 4
+## Chance that a round has a chest. Opening it gives a card slot or a card in the hand for the rest of
+## the run (Run.slots, Run.hand_size), or CHEST_CRUMBS once both are at their most.
+const CHEST_CHANCE := 0.4
+## The chest is at least this many cells from the mouse.
+const CHEST_MIN_DISTANCE := 4
+const CHEST_CRUMBS := 5
+## Width of the side column the slots and the hand sit in. Cards shrink so a row of them fits.
+const ROW_WIDTH := 560.0
+const SLOT_GAP := 8
 ## The cheese starts at least this many cells from the mouse, or the board's size less 2 if that's smaller.
 const MIN_CHEESE_DISTANCE := 8
 ## Crumbs scattered on the board each round, worth 1 each.
@@ -54,6 +61,10 @@ var run := Run.new()
 var pile_viewer := PileViewer.new()
 var shop := Shop.new()
 var slots: Array[CardSlot] = []
+## Size of the cards, smaller when there are more slots or a bigger hand.
+var card_size := Card.CARD_SIZE
+## The hand size the cards were last sized for (see _build_slots).
+var _built_hand_size := 0
 var turn := 1
 ## The last turn of this round. Not reaching the cheese by the end of it ends the run.
 var turn_limit := 1
@@ -61,6 +72,10 @@ var busy := false
 var discards_left := DISCARDS_PER_ROUND
 ## Crumbs picked up on the board this round.
 var round_crumbs := 0
+## What each chest opened this round gave, for the win panel.
+var chest_rewards := PackedStringArray()
+## Shown in place of the hint at the start of the next turn, after a chest is opened.
+var chest_note := ""
 ## Whether THICK FUR has already broken a trap this round.
 var trap_survived := false
 ## Cards played from RECYCLE slots, returned to the next hand.
@@ -77,16 +92,6 @@ var force_boss := -1
 
 
 func _ready() -> void:
-	for i in SLOT_COUNT:
-		var slot := CardSlot.new()
-		slot.number = i + 1
-		slot.card_dropped.connect(_on_card_dropped_on_slot.bind(slot))
-		var column := VBoxContainer.new()
-		column.add_theme_constant_override("separation", 2)
-		column.add_child(slot.header)
-		column.add_child(slot)
-		slot_row.add_child(column)
-		slots.append(slot)
 	hand_box.set_drag_forwarding(Callable(), _can_drop_on_hand, _drop_on_hand)
 	discard_card_button.set_drag_forwarding(Callable(), _can_drop_on_discard, _drop_on_discard)
 	discard_card_button.pressed.connect(func() -> void:
@@ -97,6 +102,7 @@ func _ready() -> void:
 	draw_pile_button.pressed.connect(func() -> void: _view_pile("Draw pile", run.deck.draw_pile))
 	discard_button.pressed.connect(func() -> void: _view_pile("Discard", run.deck.discard_pile))
 	board.crumb_collected.connect(_on_crumb_collected)
+	board.chest_opened.connect(_open_chest)
 	add_child(pile_viewer)
 	shop.next_round_pressed.connect(new_round)
 	add_child(shop)
@@ -140,10 +146,11 @@ func new_round() -> void:
 	var crumbs := _place_crumbs(mouse, cheese, traps)
 	var cats := _place_cats(mouse, cheese, traps)
 	board.place(mouse, cheese, traps, crumbs, cats, run.boss == Boss.Kind.ALLEY_KING, walls)
+	board.chests = _place_chests(mouse, cheese, traps, crumbs)
 	turn_limit = _turn_limit(_path_distance(mouse, cheese))
-	BugReport.note("Round %d%s: %dx%d board, %d turns, mouse %s, cheese %s, traps %s, crumbs %s" % [
+	BugReport.note("Round %d%s: %dx%d board, %d turns, mouse %s, cheese %s, traps %s, crumbs %s, chests %s" % [
 		run.round_number, " (boss %s)" % Boss.INFO[run.boss][0] if run.boss != -1 else "", board.grid,
-		board.grid, turn_limit, mouse, cheese, traps, crumbs])
+		board.grid, turn_limit, mouse, cheese, traps, crumbs, board.chests])
 	BugReport.note("Walls: %s" % [walls.keys()])
 	BugReport.note("Glue %s, conveyors %s, holes %s, floorboards %s" % [board.glue, board.conveyors,
 		board.holes, board.floorboards])
@@ -155,6 +162,8 @@ func new_round() -> void:
 	if run.has(Items.Trinket.SPARE_PAWS):
 		discards_left += SPARE_PAWS_DISCARDS
 	round_crumbs = 0
+	chest_rewards.clear()
+	chest_note = ""
 	trap_survived = false
 	win_panel.hide()
 	pile_viewer.hide()
@@ -164,9 +173,11 @@ func new_round() -> void:
 
 
 func start_turn() -> void:
+	# A chest opened last turn can have added a slot or a card.
+	_build_slots()
 	var drawn: Array[CardData] = []
 	drawn.append_array(recycled)
-	drawn.append_array(run.deck.draw(HAND_SIZE - recycled.size()))
+	drawn.append_array(run.deck.draw(_hand_size() - recycled.size()))
 	recycled.clear()
 	for data in drawn:
 		hand_box.add_child(_make_card(data))
@@ -179,6 +190,9 @@ func start_turn() -> void:
 		status_label.text = "Last turn before the kitchen light comes on!"
 	elif turn == turn_limit:
 		status_label.text = "Last turn! Reach the cheese now, or the run is over."
+	if chest_note:
+		status_label.text = chest_note if status_label.text == HINT else "%s %s" % [chest_note, status_label.text]
+	chest_note = ""
 	_refresh_hud()
 	_refresh_pouch()
 
@@ -323,6 +337,8 @@ func _end_round() -> void:
 			lines.append("Piggy bank  +%d" % interest)
 		if round_crumbs > 0:
 			lines.append("Crumbs picked up  +%d" % round_crumbs)
+		for chest in chest_rewards:
+			lines.append("Chest: %s" % chest)
 		run.crumbs += earned
 		lines.append("You have %d crumbs." % run.crumbs)
 		BugReport.note("Found the cheese on turn %d, earned %d (+%d picked up), %d crumbs" % [
@@ -433,6 +449,74 @@ func _steps(dir: Card.Dir, count: int) -> bool:
 	return false
 
 
+## Builds the run's slots (Run.slots), and sizes the cards so the slots, and the hand (Run.hand_size),
+## each fit in a row. Does nothing when they're already built for them. The slots must be empty.
+func _build_slots() -> void:
+	var count := run.slots
+	var hand := _hand_size()
+	if count == slots.size() and hand == _built_hand_size:
+		return
+	_built_hand_size = hand
+	for column in slot_row.get_children():
+		slot_row.remove_child(column)
+		column.queue_free()
+	slots.clear()
+	# A slot is its card plus 12 pixels of border. The hand is tighter: cards 4 pixels apart at least.
+	var width := minf((ROW_WIDTH - (count - 1) * SLOT_GAP) / count - 12, (ROW_WIDTH - (hand - 1) * 4) / hand)
+	width = floorf(minf(width, Card.CARD_SIZE.x))
+	card_size = Vector2(width, roundf(width * Card.CARD_SIZE.y / Card.CARD_SIZE.x))
+	hand_box.custom_minimum_size.y = card_size.y
+	hand_box.add_theme_constant_override("separation",
+		clampi(floori((ROW_WIDTH - hand * width) / (hand - 1)), 4, SLOT_GAP))
+	for i in count:
+		var slot := CardSlot.new()
+		slot.number = i + 1
+		slot.card_size = card_size
+		slot.card_dropped.connect(_on_card_dropped_on_slot.bind(slot))
+		var column := VBoxContainer.new()
+		column.add_theme_constant_override("separation", 2)
+		column.add_child(slot.header)
+		column.add_child(slot)
+		slot_row.add_child(column)
+		slots.append(slot)
+
+
+## Cards dealt each turn.
+func _hand_size() -> int:
+	return run.hand_size
+
+
+## Gives a card slot or a card in the hand for the rest of the run, picked at random, starting next
+## turn. A slot is only on offer while there are fewer slots than cards, so it can be filled. Once
+## neither can grow, pays CHEST_CRUMBS instead.
+func _open_chest(cell: Vector2i) -> void:
+	var rewards: Array[String] = []
+	if run.slots < mini(run.hand_size, Run.MAX_SLOTS):
+		rewards.append("slot")
+	if run.hand_size < Run.MAX_HAND_SIZE:
+		rewards.append("card")
+	var reward: String = "crumbs" if rewards.is_empty() else rewards.pick_random()
+	var text := ""
+	match reward:
+		"slot":
+			run.slots += 1
+			text = "+1 card slot (%d now)" % run.slots
+			chest_note = "Chest! You have another card slot: %d now." % run.slots
+		"card":
+			run.hand_size += 1
+			text = "+1 card in hand (%d now)" % run.hand_size
+			chest_note = "Chest! You draw another card each turn: %d now." % run.hand_size
+		"crumbs":
+			run.crumbs += CHEST_CRUMBS
+			round_crumbs += CHEST_CRUMBS
+			text = "+%d crumbs" % CHEST_CRUMBS
+			chest_note = "Chest! %d crumbs." % CHEST_CRUMBS
+			_refresh_hud()
+	chest_rewards.append(text)
+	status_label.text = chest_note
+	BugReport.note("  Opened a chest at %s: %s" % [cell, text])
+
+
 ## Slots in the order they play: left to right, with LAST slots moved to the end.
 func _play_order() -> Array[CardSlot]:
 	var order: Array[CardSlot] = []
@@ -453,7 +537,7 @@ func _roll_effects() -> void:
 	if run.has(Items.Trinket.LUCKY_TAIL):
 		pool.erase(CardSlot.Effect.BLOCKED)
 	# Don't burn the deck down below a full hand.
-	if run.deck.draw_pile.size() + run.deck.discard_pile.size() + _all_cards().size() <= HAND_SIZE:
+	if run.deck.draw_pile.size() + run.deck.discard_pile.size() + _all_cards().size() <= _hand_size():
 		pool.erase(CardSlot.Effect.BURN)
 	# Set once an earlier slot plays before this one, so ECHO has a move to repeat.
 	var after_a_move := false
@@ -586,6 +670,7 @@ func discard_card(card: Card) -> void:
 func _make_card(data: CardData) -> Card:
 	var card := Card.new()
 	card.data = data
+	card.card_size = card_size
 	card.pressed.connect(_on_card_clicked.bind(card))
 	card.card_dropped_on.connect(_on_card_dropped_on_card.bind(card))
 	card.discard_requested.connect(discard_card.bind(card))
@@ -799,6 +884,23 @@ func reroll_effects() -> void:
 		_roll_effects()
 
 
+## Sets the run's card slots and hand size, as chests would. Mid-round, the cards held go to the
+## discard pile and a new hand is dealt; between rounds, they apply from the next round.
+func set_slots_and_hand(slot_count: int, hand_size: int) -> void:
+	if busy:
+		return
+	run.slots = clampi(slot_count, 1, Run.MAX_SLOTS)
+	run.hand_size = clampi(hand_size, 1, Run.MAX_HAND_SIZE)
+	if win_panel.visible or shop.visible:
+		return
+	var held: Array[CardData] = []
+	for card in _all_cards():
+		held.append(card.data)
+	_clear_cards()
+	run.deck.discard(held)
+	start_turn()
+
+
 ## Adds a card to the hand. With keep, it joins the deck for the rest of the run too. Between rounds
 ## there's no hand, so only a kept card is added. Returns whether the card went into the hand.
 func add_card(data: CardData, keep: bool) -> bool:
@@ -870,7 +972,9 @@ func _bug_report_state() -> String:
 	lines.append("Conveyors: %s" % ", ".join(belts))
 	lines.append("Mouse holes (linked in pairs): %s" % [board.holes])
 	lines.append("Floorboards: %s, broken: %s" % [board.floorboards, board.broken])
-	lines.append("Crumbs on board: %s" % [board.crumbs])
+	lines.append("Crumbs on board: %s, chests: %s" % [board.crumbs, board.chests])
+	lines.append("Slots %d, hand size %d, chests opened this round: %s" % [run.slots, run.hand_size,
+		", ".join(chest_rewards) if chest_rewards else "-"])
 	lines.append("Cats: %s" % _cat_paths())
 	for slot in slots:
 		var card := slot.get_card()
@@ -1055,6 +1159,23 @@ func _place_crumbs(mouse: Vector2i, cheese: Vector2i, traps: Array[Vector2i]) ->
 		if cell not in [mouse, cheese] and cell not in traps and cell not in crumbs and not board.has_tile(cell):
 			crumbs.append(cell)
 	return crumbs
+
+
+## With CHEST_CHANCE, picks a cell for a chest at least CHEST_MIN_DISTANCE from the mouse, and off the
+## cheese, the traps, the floor tiles and the crumbs.
+func _place_chests(mouse: Vector2i, cheese: Vector2i, traps: Array[Vector2i],
+		crumbs: Array[Vector2i]) -> Array[Vector2i]:
+	var chests: Array[Vector2i] = []
+	if randf() >= CHEST_CHANCE:
+		return chests
+	var spacing := mini(CHEST_MIN_DISTANCE, board.grid - 2)
+	for attempt in 1000:
+		var cell := _random_cell()
+		if _distance(cell, mouse) >= spacing and cell != cheese and cell not in traps \
+				and cell not in crumbs and not board.has_tile(cell):
+			chests.append(cell)
+			break
+	return chests
 
 
 ## Picks cat cells off the cheese and the traps, well away from the mouse and spread out from each other.

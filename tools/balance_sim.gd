@@ -7,6 +7,7 @@ extends SceneTree
 ## Runs go on until the bot loses, so later rounds are bigger and busier (see Difficulty). --round N
 ## plays every round as round N of a fresh run instead. Boss rounds are off unless --boss names one
 ## (alley_king, runaway_cheese, kitchen_light): then every round is that boss, each on a fresh run.
+## --slots N and --hand N start every run with that many card slots and cards in hand (chests add more).
 
 const MAX_TURNS := 200
 
@@ -16,6 +17,12 @@ var rng_seed := 1
 var boss := -1
 ## The round number every round is played as, or 0 to let runs go on.
 var fixed_round := 0
+## Card slots and hand size each run starts with, or 0 for the game's own (Run.START_SLOTS, ...).
+var slot_count := 0
+var hand_size := 0
+## Rounds that had a chest, and chests opened.
+var chest_rounds := 0
+var chests_opened := 0
 var main: Node
 var board: Board
 
@@ -59,6 +66,10 @@ func _initialize() -> void:
 					return
 			"--round":
 				fixed_round = maxi(args[i + 1].to_int(), 1)
+			"--slots":
+				slot_count = clampi(args[i + 1].to_int(), 1, Run.MAX_SLOTS)
+			"--hand":
+				hand_size = clampi(args[i + 1].to_int(), 1, Run.MAX_HAND_SIZE)
 	for effect in CardSlot.Effect.values():
 		effect_stats[effect] = [0, 0, 0, 0]
 	_run.call_deferred()
@@ -72,7 +83,7 @@ func _run() -> void:
 	board.animate = false
 	main.bosses_enabled = false
 	main.force_boss = boss
-	if boss != -1 or fixed_round > 0:
+	if boss != -1 or fixed_round > 0 or slot_count > 0 or hand_size > 0:
 		_new_run()
 	for r in rounds:
 		if r > 0:
@@ -94,6 +105,9 @@ func _new_run() -> void:
 	if fixed_round > 1:
 		main.run.round_number = fixed_round - 1
 		main.new_round()
+	if slot_count > 0 or hand_size > 0:
+		main.set_slots_and_hand(slot_count if slot_count > 0 else main.run.slots,
+			hand_size if hand_size > 0 else main.run.hand_size)
 
 
 func _play_round() -> void:
@@ -103,6 +117,8 @@ func _play_round() -> void:
 		round_stats[number] = [0, 0, 0, 0, 0, 0]
 	var tally: Array = round_stats[number]
 	tally[0] += 1
+	if not board.chests.is_empty():
+		chest_rounds += 1
 	while not main.win_panel.visible:
 		if main.turn > MAX_TURNS:
 			unfinished += 1
@@ -140,6 +156,7 @@ func _play_round() -> void:
 		round_turns.append(main.turn)
 		won_crumbs += main.run.crumbs - crumbs_before
 		crumbs_picked_up += main.round_crumbs
+	chests_opened += main.chest_rewards.size()
 
 
 ## Greedy bot: for each slot in play order, places the card that brings the mouse closest to the cheese
@@ -224,8 +241,10 @@ func _report() -> void:
 	for t in sorted:
 		total += t
 	var n := sorted.size()
-	print("\nBalance sim: %d rounds, seed %d, greedy bot%s%s" % [rounds, rng_seed,
+	print("\nBalance sim: %d rounds, seed %d, greedy bot%s%s%s" % [rounds, rng_seed,
 		", boss %s" % Boss.INFO[boss][0] if boss != -1 else "",
+		", runs start with %d slots and %d cards" % [slot_count if slot_count > 0 else Run.START_SLOTS,
+			hand_size if hand_size > 0 else Run.START_HAND_SIZE] if slot_count > 0 or hand_size > 0 else "",
 		", every round is round %d (%s)" % [fixed_round, Difficulty.describe(fixed_round)] if fixed_round > 0 else ""])
 	print("Caught in a trap: %d rounds (%.1f%%)" % [caught, 100.0 * caught / max(rounds, 1)])
 	print("Caught by a cat: %d rounds (%.1f%%)" % [caught_by_cat, 100.0 * caught_by_cat / max(rounds, 1)])
@@ -243,6 +262,7 @@ func _report() -> void:
 		print("  %-6s %5.1f%%  %s" % [label, share, "#".repeat(roundi(share / 2))])
 	print("Crumbs per won round: %.1f (%.1f picked up on the board)" % [
 		float(won_crumbs) / n, float(crumbs_picked_up) / n])
+	print("Chests: %d rounds had one, the bot opened %d (it doesn't go for them)" % [chest_rounds, chests_opened])
 
 	print("\nCells gained per turn with cards only in plain slots: %.2f" % [
 		float(plain_gain) / max(plain_turns, 1)])

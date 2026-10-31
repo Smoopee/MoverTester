@@ -1,7 +1,7 @@
 # Mouse & Cheese (MoverTester)
 
-A Godot 4.6 deckbuilder prototype. Each turn you draw a hand of direction cards, place up to four in
-slots, then Lock In: the mouse moves one cell per card, in slot order, on a square grid until it
+A Godot 4.6 deckbuilder prototype. Each turn you draw a hand of direction cards (6 to start), place
+them in slots (4 to start), then Lock In: the mouse moves one cell per card, in slot order, on a square grid until it
 reaches the cheese, within the round's turn limit. Each turn about half the slots roll an **effect** (REVERSED, SLIDE, ECHO, BURN, ...)
 that changes how the card in that slot plays. Slot effects are where the game's content lives.
 Each round also gives `DISCARDS_PER_ROUND` (5) discards: right-click a card, or drag it onto the
@@ -34,7 +34,13 @@ walls are added, and the other obstacles join one at a time: cats (round 4), glu
 path length around the walls and traps (`Board.distances_from`) with a few spare turns that shrink
 over the run.
 
-Rounds chain into an endless **run**: the deck, crumbs, trinkets and pouch carry over until a trap
+A round may have a **chest** (`main.gd` `CHEST_CHANCE`, `_place_chests`), opened by walking or
+sliding over it like a crumb. It gives, at random, a card slot (`Run.slots`, up to 8, and never more
+slots than cards in hand) or a card in the hand (`Run.hand_size`, up to 10) for the rest of the run,
+from the next turn (`_open_chest`); crumbs once both are maxed. `_build_slots` rebuilds the slots at
+the start of a turn and shrinks the cards so the slots and the hand each fit their row.
+
+Rounds chain into an endless **run**: the deck, crumbs, trinkets, pouch, slots and hand size carry over until a trap
 or a cat catches the mouse, or the turns run out (`main.gd` `lost()`), which starts a new run. A won round pays crumbs (`WIN_CRUMBS` + unused discards, plus
 crumbs picked up on the board), then opens the **shop**. It sells trinkets (passive for the run),
 consumables (held in the pouch, used once) and card stamps (a slot effect stuck on one card). A
@@ -58,14 +64,14 @@ pays `Boss.WIN_CRUMBS` and offers a free trinket.
   `glue`, `holes`, `belts`, `floorboards`, `turn_limit`)
   and its tuning constants. `main.gd` `_turn_limit` applies the boss changes on top.
 - `scripts/board.gd` — `Board`: the `grid` size (smaller boards are drawn zoomed in to fill the same
-  area), grid, wall, mouse, cheese, mouse-trap, crumb and cat drawing; `step` / `slide` /
+  area), grid, wall, mouse, cheese, mouse-trap, crumb, chest and cat drawing; `step` / `slide` /
   `jump` movement, each returning true when the round ends (mouse on the cheese, or `is_caught()`:
   `is_trapped()` on a trap or `caught_by_cat()` on a cat or its path). Jumps only check the landing
   cell, so they hop over traps, cat paths and crumbs, but they stop short of walls
   (`_jump_landing`). `walls` is a set of `Vector3i(x, y, 0 right / 1 below)` edge keys
   (`wall_between`, `has_wall`); `squeeze` lets the mouse through them. `step_target` is where a step
   lands and `distances_from` is a BFS around walls and traps (turn limit, SNIFF, the Alley King,
-  wall generation, the sim bot). Crumbs emit `crumb_collected`. `move_cats()`
+  wall generation, the sim bot). Crumbs emit `crumb_collected`, chests `chest_opened`. `move_cats()`
   walks the cats at the end of a turn, `move_cheese()` runs the cheese for RUNAWAY CHEESE;
   `is_deadly(cell)` says whether moving onto a cell is fatal.
 - `scripts/cat.gd` — `Cat`: one roaming cat's cell and this turn's `path` (`steps` cells), and
@@ -76,7 +82,7 @@ pays `Boss.WIN_CRUMBS` and offers a free trinket.
   its `data`.
 - `scripts/card_data.gd` — `CardData`: a deck card's direction and stamp. Piles hold these.
 - `scripts/deck.gd` — `Deck`: the run's `cards`, and the round's draw and discard piles built from them.
-- `scripts/run.gd` — `Run`: state that lasts a run (deck, round number, crumbs, trinkets, pouch,
+- `scripts/run.gd` — `Run`: state that lasts a run (deck, slots, hand size, round number, crumbs, trinkets, pouch,
   this and the next boss, bosses beaten).
 - `scripts/items.gd` — `Items`: shop content, meaning the `Trinket` and `Consumable` enums with
   name / description / price tables, and the `STAMPS` the shop offers.
@@ -114,7 +120,8 @@ Godot 4.6 is at `C:\Program Files\Godot\godot.exe` (the `*_console.exe` launcher
 ```
 
 The sim lets runs go on, so it prints win/loss rates per round number (the difficulty curve). Add
-`--round N` to play every round as round N, and `--boss <name>` to make every round that boss.
+`--round N` to play every round as round N, `--boss <name>` to make every round that boss, and
+`--slots N` / `--hand N` to start every run with that many slots / cards in hand.
 
 A new `class_name` script isn't visible to the parse check until Godot refreshes its class cache:
 `"/c/Program Files/Godot/godot.exe" --headless --path . --import`.

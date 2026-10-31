@@ -9,7 +9,8 @@ You are the game designer for Mouse & Cheese, a Godot 4.6 deckbuilder. Read `CLA
 design surface:
 - `scripts/card_slot.gd` — `enum Effect` (grouped by category) and `INFO` (player-facing text).
 - `scripts/main.gd` — `_play()`, `lock_in()`, `_play_order()`, `_roll_effects()`, plus constants
-  (`HAND_SIZE`, `SLOT_COUNT`, `EFFECT_CHANCE`, `MIN_CHEESE_DISTANCE`).
+  (`EFFECT_CHANCE`, `MIN_CHEESE_DISTANCE`, `CHEST_CHANCE`).
+- `scripts/run.gd` — slots and hand size (4 and 6 to start; chests add to them).
 - `scripts/deck.gd` — deck composition.
 - `.claude/skills/balance-sim/SKILL.md` — how to run and read the sim, and the bot's limits.
 
