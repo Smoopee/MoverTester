@@ -7,14 +7,32 @@ that changes how the card in that slot plays. Slot effects are where the game's 
 Each round also gives `DISCARDS_PER_ROUND` (5) discards: right-click a card, or drag it onto the
 Discard button, to swap it for a new draw (`main.gd` `discard_card`).
 
-The board has mouse traps and roaming **cats**. Each cat shows the path it will walk
-this turn; moving onto a cat or its path catches the mouse. After the mouse moves, the cats walk
-their paths and plan new ones, which never cover the mouse's cell, the cheese or a trap.
+The board has mouse traps, **walls** and roaming **cats**. Walls are segments on cell edges, laid
+in short runs that can turn corners (`main.gd` `_place_walls`, which rejects any run that would cut
+a cell off). Nothing walks, slides or jumps through a wall, except the mouse during a turn of the
+SQUEEZE consumable. Each cat shows the path it will walk this turn; moving onto a cat or its path
+catches the mouse. After the mouse moves, the cats walk their paths and plan new ones, which never
+cover the mouse's cell, the cheese or a trap.
+
+Later rounds add **floor tiles** (`main.gd` `_place_floor`), at most one per cell and never on the
+mouse, cheese, a trap or a crumb. They act on the cell a move ends on, except where noted:
+- **Glue**: the mouse sticks for the rest of the turn (`Board.stuck`; `lock_in` fizzles the cards
+  left). Slides stop on it; jumps pass over it.
+- **Mouse holes**, in linked pairs (`holes[0]` with `holes[1]`, ...): pop out of the other one.
+- **Conveyor belts**: carry the mouse a cell the belt's way, and on along the belt. Never placed
+  to push into a wall, off the board or onto a trap.
+- **Creaky floorboards**: break into a gap (`broken`) once the mouse walks, slides or jumps off.
+  Nothing can move onto a gap, but jumps pass over it. Only placed where breaking every one still
+  leaves all cells reachable.
+
+Holes and conveyors chain (`Board._ride`); the pathfinding ignores them (and glue).
 
 **Difficulty** (`scripts/difficulty.gd`) rises with the round number: the first two rounds are a
-small board (8x8) with no traps or cats, then the grid grows a cell a round up to 20x20 and traps
-and cats are added. Every round has a turn limit, set from the mouse-to-cheese distance with a few
-spare turns that shrink over the run.
+small board (8x8) with no obstacles, then the grid grows a cell a round up to 20x20 and traps and
+walls are added, and the other obstacles join one at a time: cats (round 4), glue (5), mouse holes
+(7), conveyors (8) and floorboards (10). Every round has a turn limit, set from the mouse-to-cheese
+path length around the walls and traps (`Board.distances_from`) with a few spare turns that shrink
+over the run.
 
 Rounds chain into an endless **run**: the deck, crumbs, trinkets and pouch carry over until a trap
 or a cat catches the mouse, or the turns run out (`main.gd` `lost()`), which starts a new run. A won round pays crumbs (`WIN_CRUMBS` + unused discards, plus
@@ -36,13 +54,18 @@ pays `Boss.WIN_CRUMBS` and offers a free trinket.
 - `scripts/card_slot.gd` — `CardSlot`: the `Effect` enum, `INFO` (name / description / color per
   effect), `play_dir()` for effects that change direction, and `effect_for(card)` (the slot's effect,
   else the card's stamp).
-- `scripts/difficulty.gd` — `Difficulty`: the per-round curve (`grid`, `traps`, `cats`, `turn_limit`)
+- `scripts/difficulty.gd` — `Difficulty`: the per-round curve (`grid`, `traps`, `walls`, `cats`,
+  `glue`, `holes`, `belts`, `floorboards`, `turn_limit`)
   and its tuning constants. `main.gd` `_turn_limit` applies the boss changes on top.
 - `scripts/board.gd` — `Board`: the `grid` size (smaller boards are drawn zoomed in to fill the same
-  area), grid, mouse, cheese, mouse-trap, crumb and cat drawing; `step` / `slide` /
+  area), grid, wall, mouse, cheese, mouse-trap, crumb and cat drawing; `step` / `slide` /
   `jump` movement, each returning true when the round ends (mouse on the cheese, or `is_caught()`:
   `is_trapped()` on a trap or `caught_by_cat()` on a cat or its path). Jumps only check the landing
-  cell, so they hop over traps, cat paths and crumbs. Crumbs emit `crumb_collected`. `move_cats()`
+  cell, so they hop over traps, cat paths and crumbs, but they stop short of walls
+  (`_jump_landing`). `walls` is a set of `Vector3i(x, y, 0 right / 1 below)` edge keys
+  (`wall_between`, `has_wall`); `squeeze` lets the mouse through them. `step_target` is where a step
+  lands and `distances_from` is a BFS around walls and traps (turn limit, SNIFF, the Alley King,
+  wall generation, the sim bot). Crumbs emit `crumb_collected`. `move_cats()`
   walks the cats at the end of a turn, `move_cheese()` runs the cheese for RUNAWAY CHEESE;
   `is_deadly(cell)` says whether moving onto a cell is fatal.
 - `scripts/cat.gd` — `Cat`: one roaming cat's cell and this turn's `path` (`steps` cells), and

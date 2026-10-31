@@ -8,6 +8,14 @@ const SLOT_COUNT := 4
 const MIN_CHEESE_DISTANCE := 8
 ## Crumbs scattered on the board each round, worth 1 each.
 const CRUMB_COUNT := 6
+## Each run of wall is this many wall segments long, end to end along cell edges, turning a corner at
+## each one with WALL_TURN_CHANCE.
+const WALL_RUN_MIN := 2
+const WALL_RUN_MAX := 5
+const WALL_TURN_CHANCE := 0.35
+## Each conveyor belt is this many cells in a line, all running the same way.
+const BELT_MIN := 2
+const BELT_MAX := 4
 ## Cats start at least this many cells from the mouse and each other, or half the board's size if
 ## that's smaller.
 const CAT_MIN_DISTANCE := 6
@@ -127,13 +135,18 @@ func new_round() -> void:
 	while _distance(mouse, cheese) < mini(MIN_CHEESE_DISTANCE, board.grid - 2):
 		cheese = _random_cell()
 	var traps := _place_traps(mouse, cheese)
+	var walls := _place_walls(mouse, traps)
+	_place_floor(mouse, cheese, traps)
 	var crumbs := _place_crumbs(mouse, cheese, traps)
 	var cats := _place_cats(mouse, cheese, traps)
-	board.place(mouse, cheese, traps, crumbs, cats, run.boss == Boss.Kind.ALLEY_KING)
-	turn_limit = _turn_limit(_distance(mouse, cheese))
+	board.place(mouse, cheese, traps, crumbs, cats, run.boss == Boss.Kind.ALLEY_KING, walls)
+	turn_limit = _turn_limit(_path_distance(mouse, cheese))
 	BugReport.note("Round %d%s: %dx%d board, %d turns, mouse %s, cheese %s, traps %s, crumbs %s" % [
 		run.round_number, " (boss %s)" % Boss.INFO[run.boss][0] if run.boss != -1 else "", board.grid,
 		board.grid, turn_limit, mouse, cheese, traps, crumbs])
+	BugReport.note("Walls: %s" % [walls.keys()])
+	BugReport.note("Glue %s, conveyors %s, holes %s, floorboards %s" % [board.glue, board.conveyors,
+		board.holes, board.floorboards])
 	BugReport.note("Cats: %s" % _cat_paths())
 	turn = 1
 	out_of_time = false
@@ -190,11 +203,12 @@ func lock_in() -> void:
 
 	BugReport.note("Lock in")
 	last_dir = -1
+	board.stuck = false
 	var order := _play_order()
 	# Set when the mouse reaches the cheese or is caught in a trap.
 	var ended := false
 	var i := 0
-	while i < order.size() and not ended:
+	while i < order.size() and not ended and not board.stuck:
 		var slot := order[i]
 		var card := slot.get_card()
 		i += 1
@@ -226,6 +240,17 @@ func lock_in() -> void:
 			ended = false
 		if card.modulate == PLAYING:
 			card.modulate = PLAYED
+	# Glue holds the mouse: the cards left don't move it.
+	if board.stuck and not ended:
+		for slot in order.slice(i):
+			if slot.get_card():
+				slot.get_card().modulate = FIZZLED
+		status_label.text = "Stuck in glue! The rest of this turn's cards don't move the mouse."
+		if board.animate:
+			await get_tree().create_timer(Board.STEP_TIME * 2, false).timeout
+	if board.squeeze:
+		board.squeeze = false
+		BugReport.note("Squeeze wore off")
 
 	# Before the cats walk: the cheese stays off their paths, so no cat ends up on it.
 	if not ended and run.boss == Boss.Kind.RUNAWAY_CHEESE:
@@ -363,9 +388,11 @@ func _play(slot: CardSlot, card: Card) -> bool:
 			if last_dir != -1:
 				if await _steps(last_dir as Card.Dir, 1):
 					return true
+				if board.stuck:
+					return false
 		CardSlot.Effect.SNIFF:
-			var now := _distance(board.mouse_cell, board.cheese_cell)
-			if _distance(board.mouse_cell + offset, board.cheese_cell) >= now:
+			var now := _path_distance(board.cheese_cell, board.mouse_cell)
+			if _path_distance(board.cheese_cell, board.step_target(board.mouse_cell, dir)) >= now:
 				card.modulate = FIZZLED
 				BugReport.note("  Slot %d SNIFF %s fizzled" % [slot.number, Card.NAMES[dir]])
 				status_label.text = "Sniff: %s isn't toward the cheese, so the mouse stays put." % Card.NAMES[dir]
@@ -376,12 +403,14 @@ func _play(slot: CardSlot, card: Card) -> bool:
 	return await _steps(dir, 1)
 
 
-## Steps count cells. A trap THICK FUR breaks doesn't stop the remaining steps.
+## Steps count cells. A trap THICK FUR breaks doesn't stop the remaining steps, but glue does.
 func _steps(dir: Card.Dir, count: int) -> bool:
 	for i in count:
 		last_dir = dir
 		if await board.step(dir) and not _survive_trap():
 			return true
+		if board.stuck:
+			break
 	return false
 
 
@@ -477,6 +506,13 @@ func use_consumable(index: int) -> void:
 			board.remove_trap(nearest)
 			BugReport.note("  Removed trap at %s" % nearest)
 			status_label.text = "Cheese Bait: the nearest trap is gone."
+		Items.Consumable.SQUEEZE:
+			if board.walls.is_empty() or board.squeeze:
+				status_label.text = "There are no walls to squeeze through." if board.walls.is_empty() \
+					else "The mouse is already squeezing through walls this turn."
+				return
+			board.squeeze = true
+			status_label.text = "Squeeze: walls won't stop the mouse this turn."
 	run.pouch.remove_at(index)
 	BugReport.note("Used %s" % item_name)
 	_refresh_hud()
@@ -803,9 +839,18 @@ func _bug_report_state() -> String:
 	lines.append("Crumbs %d (%d picked up this round), trinkets: %s, pouch: %s%s" % [run.crumbs,
 		round_crumbs, ", ".join(trinket_names) if trinket_names else "-",
 		", ".join(pouch_names) if pouch_names else "-", ", thick fur used" if trap_survived else ""])
-	lines.append("Mouse %s facing %s, cheese %s, distance %d" % [board.mouse_cell,
-		Card.NAMES[board.facing], board.cheese_cell, _distance(board.mouse_cell, board.cheese_cell)])
+	lines.append("Mouse %s facing %s, cheese %s, distance %d (%d by path)%s" % [board.mouse_cell,
+		Card.NAMES[board.facing], board.cheese_cell, _distance(board.mouse_cell, board.cheese_cell),
+		_path_distance(board.mouse_cell, board.cheese_cell), ", squeezing" if board.squeeze else ""])
 	lines.append("Traps: %s" % [board.traps])
+	lines.append("Walls (x, y, 0 right / 1 below): %s" % [board.walls.keys()])
+	lines.append("Glue: %s%s" % [board.glue, ", mouse stuck" if board.stuck else ""])
+	var belts := PackedStringArray()
+	for cell: Vector2i in board.conveyors:
+		belts.append("%s %s" % [cell, Card.NAMES[board.conveyors[cell]]])
+	lines.append("Conveyors: %s" % ", ".join(belts))
+	lines.append("Mouse holes (linked in pairs): %s" % [board.holes])
+	lines.append("Floorboards: %s, broken: %s" % [board.floorboards, board.broken])
 	lines.append("Crumbs on board: %s" % [board.crumbs])
 	lines.append("Cats: %s" % _cat_paths())
 	for slot in slots:
@@ -862,14 +907,133 @@ func _place_traps(mouse: Vector2i, cheese: Vector2i) -> Array[Vector2i]:
 	return traps
 
 
-## Picks crumb cells off the mouse, the cheese, the traps and each other.
+## Lays down Difficulty.walls() runs of wall, each a line of wall segments along cell edges that
+## sometimes turns a corner. A run that would cut any cell off from the mouse (with the traps' help)
+## is left out, so the cheese and every crumb can always be reached and no cat gets shut in.
+func _place_walls(mouse: Vector2i, traps: Array[Vector2i]) -> Dictionary[Vector3i, bool]:
+	# Built on the board so its pathfinding can check each run.
+	board.walls = {}
+	board.traps = traps
+	var open_cells := board.grid * board.grid - traps.size()
+	var runs := 0
+	for attempt in 200:
+		if runs == Difficulty.walls(run.round_number):
+			break
+		var added: Array[Vector3i] = []
+		for wall in _wall_run():
+			if not board.walls.has(wall):
+				board.walls[wall] = true
+				added.append(wall)
+		if not added.is_empty() and board.distances_from(mouse).size() == open_cells:
+			runs += 1
+		else:
+			for wall in added:
+				board.walls.erase(wall)
+	return board.walls
+
+
+## A random run of wall: a walk along the grid lines between cells, from a corner inside the board,
+## that ends early rather than run along the board's edge. Empty if that leaves it shorter than
+## WALL_RUN_MIN.
+func _wall_run() -> Array[Vector3i]:
+	var walls: Array[Vector3i] = []
+	# Points are cell corners: (x, y) is the top-left corner of cell (x, y).
+	var point := Vector2i(randi_range(1, board.grid - 1), randi_range(1, board.grid - 1))
+	var dir: Card.Dir = Card.Dir.values().pick_random()
+	for i in randi_range(WALL_RUN_MIN, WALL_RUN_MAX):
+		if i > 0 and randf() < WALL_TURN_CHANCE:
+			var offset: Vector2i = Card.OFFSETS[dir]
+			dir = Card.OFFSETS.find_key(Vector2i(offset.y, offset.x) * [1, -1].pick_random()) as Card.Dir
+		var next: Vector2i = point + Card.OFFSETS[dir]
+		var low := Vector2i(mini(point.x, next.x), mini(point.y, next.y))
+		var horizontal := point.y == next.y
+		# A horizontal edge is the top of the cell to its lower right, a vertical one its left.
+		if horizontal and (low.y <= 0 or low.y >= board.grid or low.x < 0 or low.x >= board.grid):
+			break
+		if not horizontal and (low.x <= 0 or low.x >= board.grid or low.y < 0 or low.y >= board.grid):
+			break
+		walls.append(Vector3i(low.x, low.y - 1, 1) if horizontal else Vector3i(low.x - 1, low.y, 0))
+		point = next
+	if walls.size() < WALL_RUN_MIN:
+		walls.clear()
+	return walls
+
+
+## Lays down the round's glue pads, mouse holes, conveyor belts and creaky floorboards, at most one
+## on a cell and none on the mouse, the cheese or a trap. Linked holes are at least half the board
+## apart. A belt runs in a straight line with no walls across it, and never carries the mouse off the
+## board, into a wall or onto a trap. Floorboards only go where breaking all of them would still leave
+## every cell reachable, so they can't shut the mouse off from the cheese.
+func _place_floor(mouse: Vector2i, cheese: Vector2i, traps: Array[Vector2i]) -> void:
+	board.glue = []
+	board.conveyors = {}
+	board.holes = []
+	board.floorboards = []
+	board.broken = []
+	var number := run.round_number
+	var bounds := Rect2i(0, 0, board.grid, board.grid)
+	var free := func(cell: Vector2i) -> bool:
+		return bounds.has_point(cell) and cell != mouse and cell != cheese and cell not in traps \
+			and not board.has_tile(cell)
+	for attempt in 500:
+		if board.glue.size() == Difficulty.glue(number):
+			break
+		var cell := _random_cell()
+		if free.call(cell):
+			board.glue.append(cell)
+
+	for attempt in 500:
+		if board.holes.size() == Difficulty.holes(number) * 2:
+			break
+		var cell := _random_cell()
+		if free.call(cell) and (board.holes.size() % 2 == 0
+				or _distance(cell, board.holes[-1]) >= floori(board.grid / 2.0)):
+			board.holes.append(cell)
+	if board.holes.size() % 2 == 1:
+		board.holes.pop_back()
+
+	var belts := 0
+	for attempt in 500:
+		if belts == Difficulty.belts(number):
+			break
+		var dir: Card.Dir = Card.Dir.values().pick_random()
+		var offset: Vector2i = Card.OFFSETS[dir]
+		var cells: Array[Vector2i] = [_random_cell()]
+		for i in randi_range(BELT_MIN, BELT_MAX) - 1:
+			cells.append(cells[-1] + offset)
+		var end := cells[-1] + offset
+		var fits := cells.all(free) and bounds.has_point(end) and end not in traps
+		for cell in cells:
+			fits = fits and not board.has_wall(cell, cell + offset)
+		if fits:
+			for cell in cells:
+				board.conveyors[cell] = dir
+			belts += 1
+
+	var open_cells := board.grid * board.grid - traps.size()
+	for attempt in 500:
+		if board.floorboards.size() == Difficulty.floorboards(number):
+			break
+		var cell := _random_cell()
+		if not free.call(cell):
+			continue
+		# Check with every floorboard broken.
+		board.broken.assign(board.floorboards + [cell])
+		var reachable := board.distances_from(mouse).size()
+		if reachable == open_cells - board.broken.size():
+			board.floorboards.append(cell)
+		board.broken.clear()
+
+
+## Picks crumb cells off the mouse, the cheese, the traps, the floor tiles (see _place_floor) and
+## each other.
 func _place_crumbs(mouse: Vector2i, cheese: Vector2i, traps: Array[Vector2i]) -> Array[Vector2i]:
 	var crumbs: Array[Vector2i] = []
 	for attempt in 1000:
 		if crumbs.size() == CRUMB_COUNT:
 			break
 		var cell := _random_cell()
-		if cell not in [mouse, cheese] and cell not in traps and cell not in crumbs:
+		if cell not in [mouse, cheese] and cell not in traps and cell not in crumbs and not board.has_tile(cell):
 			crumbs.append(cell)
 	return crumbs
 
@@ -908,6 +1072,12 @@ func _turn_limit(distance: int) -> int:
 		Boss.Kind.RUNAWAY_CHEESE:
 			limit += Boss.RUNAWAY_CHEESE_EXTRA_TURNS
 	return limit
+
+
+## Steps from one cell to another around the walls and traps (through the walls while squeezing), or
+## the straight distance when there's no way through.
+func _path_distance(from: Vector2i, to: Vector2i) -> int:
+	return board.distances_from(from, board.squeeze).get(to, _distance(from, to))
 
 
 ## Each cat's cell and the path it will walk, for the bug report.
