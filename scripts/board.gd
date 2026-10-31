@@ -5,6 +5,8 @@ extends Control
 
 ## The mouse picked up the crumb on this cell.
 signal crumb_collected(cell: Vector2i)
+## The mouse opened the chest on this cell.
+signal chest_opened(cell: Vector2i)
 ## A cell was left-clicked, side being the edge of the cell nearest the click. The F2 dev menu uses
 ## it to edit the board.
 signal cell_clicked(cell: Vector2i, side: Card.Dir)
@@ -62,6 +64,7 @@ const CAT_STEP_TIME := 0.2
 const KING_FUR := Color("5a5560")
 const KING_STRIPE := Color("2f2c33")
 const CROWN := Color("f5c542")
+const CHEST_GOLD := Color("ffd23f")
 ## How much bigger the Alley King is drawn than a cat.
 const KING_SCALE := 1.3
 const CHEESE_STEP_TIME := 0.2
@@ -113,6 +116,8 @@ var broken: Array[Vector2i] = []
 var stuck := false
 ## Cells with a crumb for the shop. Walking or sliding over one picks it up; jumping over one doesn't.
 var crumbs: Array[Vector2i] = []
+## Cells with a chest (Main._open_chest), opened the same way as a crumb is picked up.
+var chests: Array[Vector2i] = []
 ## Cats roaming the board. Moving onto a cat or its path loses the round; jumping over one is safe.
 var cats: Array[Cat] = []
 var facing: Card.Dir = Card.Dir.UP
@@ -271,14 +276,15 @@ func move_cats() -> void:
 
 
 ## Runs the cheese up to steps cells, each one farther from the mouse, never onto a trap, a crumb, a
-## cat or a cat's path. A cornered cheese stays put.
+## chest, a cat or a cat's path. A cornered cheese stays put.
 func move_cheese(steps: int) -> void:
 	var start := cheese_cell
 	for i in steps:
 		var best := cheese_cell
 		for dir: Card.Dir in Card.Dir.values():
 			var next: Vector2i = cheese_cell + Card.OFFSETS[dir]
-			if not _can_step(cheese_cell, next) or next == mouse_cell or next in crumbs or is_deadly(next):
+			if not _can_step(cheese_cell, next) or next == mouse_cell or next in crumbs or next in chests \
+					or is_deadly(next):
 				continue
 			if _distance(next, mouse_cell) > _distance(best, mouse_cell):
 				best = next
@@ -424,14 +430,18 @@ func _settle(tween: Tween) -> void:
 		hop = 0.0
 
 
-## Picks up any crumbs on the cells, and lets a cat on the mouse's cell pounce. Returns true if the
-## round is over.
+## Picks up any crumbs and chests on the cells, and lets a cat on the mouse's cell pounce. Returns
+## true if the round is over.
 func _arrive(cells: Array[Vector2i]) -> bool:
 	for cell in cells:
 		if cell in crumbs:
 			crumbs.erase(cell)
 			queue_redraw()
 			crumb_collected.emit(cell)
+		if cell in chests:
+			chests.erase(cell)
+			queue_redraw()
+			chest_opened.emit(cell)
 	var cat := _cat_at(mouse_cell)
 	if cat and not invincible:
 		await _pounce(cat)
@@ -569,6 +579,8 @@ func _draw() -> void:
 	_draw_cheese(_cell_center(cheese_pos))
 	for crumb in crumbs:
 		_draw_crumb(_cell_center(Vector2(crumb)))
+	for chest in chests:
+		_draw_chest(_cell_center(Vector2(chest)))
 	# Once the mouse has landed on a trap, that trap has snapped shut.
 	var snapped := is_trapped() and mouse_pos == Vector2(mouse_cell)
 	for trap in traps:
@@ -677,6 +689,21 @@ func _draw_crumb(center: Vector2) -> void:
 	for bit: Array in [[Vector2(-4, 2), 3.2], [Vector2(3, -2), 2.6], [Vector2(2, 5), 2.0]]:
 		draw_circle(center + bit[0], bit[1], CHEESE)
 		draw_circle(center + bit[0], bit[1], CHEESE_HOLE, false, 1.0, true)
+
+
+## Draws a small treasure chest from the front: a wooden box with a rounded lid, iron bands and a
+## gold lock.
+func _draw_chest(center: Vector2) -> void:
+	var box := Rect2(center + Vector2(-10, -3), Vector2(20, 12))
+	draw_rect(Rect2(box.position + Vector2(1.5, 2), box.size), SHADOW)
+	draw_colored_polygon(_ellipse(center + Vector2(0, -3), Vector2(10, 6)), TRAP_WOOD)
+	draw_rect(box, TRAP_WOOD)
+	draw_line(center + Vector2(-10, -3), center + Vector2(10, -3), TRAP_WOOD_EDGE, 1.5)
+	for x in [-6.5, 6.5]:
+		draw_line(center + Vector2(x, -8), center + Vector2(x, 9), STEEL_EDGE, 2.0)
+	draw_rect(box, TRAP_WOOD_EDGE, false, 1.5)
+	draw_rect(Rect2(center + Vector2(-2.5, -4.5), Vector2(5, 6)), CHEST_GOLD)
+	draw_rect(Rect2(center + Vector2(-2.5, -4.5), Vector2(5, 6)), TRAP_WOOD_EDGE, false, 1.0)
 
 
 ## Draws a top-down snap trap: a wooden block with a steel bar cocked back over the top half and a

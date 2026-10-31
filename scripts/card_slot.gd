@@ -45,6 +45,8 @@ const INFO := {
 }
 
 var number := 1
+## Size of the cards it holds. Set it before adding the node to the tree.
+var card_size := Card.CARD_SIZE
 var effect := Effect.NONE
 ## Direction a WILD slot plays in, whatever card is in it.
 var wild_dir := Card.Dir.UP
@@ -59,13 +61,13 @@ func _init() -> void:
 	header.flat = true
 	header.focus_mode = Control.FOCUS_NONE
 	header.clip_text = true
-	header.custom_minimum_size = Vector2(Card.CARD_SIZE.x + 12, 0)
-	header.add_theme_font_size_override("font_size", 13)
 	header.pressed.connect(_on_header_pressed)
 
 
 func _ready() -> void:
-	custom_minimum_size = Card.CARD_SIZE + Vector2(12, 12)
+	custom_minimum_size = card_size + Vector2(12, 12)
+	header.custom_minimum_size = Vector2(card_size.x + 12, 0)
+	header.add_theme_font_size_override("font_size", maxi(roundi(13 * card_size.x / Card.CARD_SIZE.x), 10))
 	_style.set_border_width_all(2)
 	_style.set_corner_radius_all(10)
 	_style.set_content_margin_all(6)
@@ -74,7 +76,7 @@ func _ready() -> void:
 	# Slot number, hidden behind the card once one is placed.
 	_number_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_number_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	_number_label.add_theme_font_size_override("font_size", 32)
+	_number_label.add_theme_font_size_override("font_size", roundi(32 * card_size.x / Card.CARD_SIZE.x))
 	_number_label.modulate = Color(1, 1, 1, 0.3)
 	add_child(_number_label)
 	# An empty header is shorter, so hold every header at a named one's height to keep the slots in line.
