@@ -62,7 +62,7 @@ func _ready() -> void:
 	add_theme_stylebox_override("disabled", _make_style(Color("f4ecd8"), color))
 	if stamp != CardSlot.Effect.NONE:
 		var info: Array = CardSlot.INFO[stamp]
-		tooltip_text = "%s stamp: %s Only in a slot with no effect of its own." % [info[0], info[1]]
+		tooltip_text = "%s stamp: %s Plays after the slot's own effect." % [info[0], info[1]]
 
 
 func _draw() -> void:

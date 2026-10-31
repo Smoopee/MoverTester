@@ -4,7 +4,7 @@ extends RefCounted
 ## Card node shows one.
 
 var dir: Card.Dir = Card.Dir.UP
-## Slot effect the card carries into plain slots. A slot's own effect wins over it.
+## Slot effect the card carries into every slot. It plays after the slot's own effect.
 var stamp: CardSlot.Effect = CardSlot.Effect.NONE
 
 

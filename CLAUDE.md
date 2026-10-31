@@ -37,8 +37,9 @@ over the run.
 Rounds chain into an endless **run**: the deck, crumbs, trinkets and pouch carry over until a trap
 or a cat catches the mouse, or the turns run out (`main.gd` `lost()`), which starts a new run. A won round pays crumbs (`WIN_CRUMBS` + unused discards, plus
 crumbs picked up on the board), then opens the **shop**. It sells trinkets (passive for the run),
-consumables (held in the pouch, used once) and card stamps (a slot effect stuck on one card, used when
-that card is in a plain slot).
+consumables (held in the pouch, used once) and card stamps (a slot effect stuck on one card). A
+stamped card plays its slot's effect first, then its stamp (`main.gd` `_play`): a BURN slot with a
+SLIDE stamp moves 3 cells, then slides. A burned card stays burned whatever its stamp.
 
 Every `Boss.EVERY` (3) rounds is a **boss round** with an extra rule: THE ALLEY KING (a big cat that
 hunts the mouse, on top of the usual cats), RUNAWAY CHEESE (the cheese runs from the mouse; a few
@@ -52,8 +53,7 @@ pays `Boss.WIN_CRUMBS` and offers a free trinket.
   rolls slot effects (`_roll_effects`), plays a turn (`lock_in` → `_play`), applies deck effects after
   the turn, pays out the round (`_end_round`), uses consumables (`use_consumable`) and applies trinkets.
 - `scripts/card_slot.gd` — `CardSlot`: the `Effect` enum, `INFO` (name / description / color per
-  effect), `play_dir()` for effects that change direction, and `effect_for(card)` (the slot's effect,
-  else the card's stamp).
+  effect) and `play_dir()` for effects that change direction.
 - `scripts/difficulty.gd` — `Difficulty`: the per-round curve (`grid`, `traps`, `walls`, `cats`,
   `glue`, `holes`, `belts`, `floorboards`, `turn_limit`)
   and its tuning constants. `main.gd` `_turn_limit` applies the boss changes on top.
