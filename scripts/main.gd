@@ -34,6 +34,8 @@ const SPARE_PAWS_DISCARDS := 2
 ## Crumbs for reaching the cheese. Unused discards pay 1 each on top.
 const WIN_CRUMBS := 5
 const PIGGY_BANK_MAX := 5
+## Extra crumbs each crumb picked up on the board pays with BOUNTIFUL HARVEST.
+const HARVEST_CRUMBS := 2
 const HINT := "Click a card to put it in the next slot, or drag it to a slot. Then Lock In."
 const PLAYING := Color(1.15, 1.15, 0.8)
 const PLAYED := Color(1, 1, 1, 0.45)
@@ -732,7 +734,7 @@ func _drop_on_hand(_at_position: Vector2, data: Variant) -> void:
 
 
 func _on_crumb_collected(cell: Vector2i) -> void:
-	var worth := 2 if run.has(Items.Trinket.CRUMB_MAGNET) else 1
+	var worth := 1 + (HARVEST_CRUMBS if run.has(Items.Trinket.BOUNTIFUL_HARVEST) else 0)
 	run.crumbs += worth
 	round_crumbs += worth
 	BugReport.note("  Picked up a crumb at %s (+%d)" % [cell, worth])
@@ -782,6 +784,7 @@ func _refresh_hud() -> void:
 
 ## Shows the run's trinkets as tags next to the title.
 func _refresh_trinkets() -> void:
+	board.magnet = run.has(Items.Trinket.CRUMB_MAGNET)
 	for child in trinket_row.get_children():
 		trinket_row.remove_child(child)
 		child.queue_free()
