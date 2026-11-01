@@ -51,13 +51,56 @@ var effect := Effect.NONE
 ## Direction a WILD slot plays in, whatever card is in it.
 var wild_dir := Card.Dir.UP
 ## Effect name shown above the slot. For a WILD slot, clicking it picks the direction.
-var header := Button.new()
+var header := Header.new()
 
 var _style := StyleBoxFlat.new()
 var _number_label := Label.new()
 
 
+## The effect name above a slot. Hovering it shows the slot's tooltip.
+class Header extends Button:
+	var slot: CardSlot
+
+	func _make_custom_tooltip(_for_text: String) -> Object:
+		return slot._make_custom_tooltip(_for_text)
+
+
+## A tooltip's content: title in color over a thin rule of the same color, then the body. The
+## TooltipPanel style around it comes from Main's theme.
+static func make_tooltip(title: String, color: Color, body: String, note := "") -> Control:
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 4)
+	var top := HBoxContainer.new()
+	box.add_child(top)
+	var title_label := Label.new()
+	title_label.text = title
+	title_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	title_label.add_theme_font_size_override("font_size", 17)
+	title_label.add_theme_color_override("font_color", color)
+	top.add_child(title_label)
+	if note != "":
+		var note_label := Label.new()
+		note_label.text = note
+		note_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		note_label.add_theme_font_size_override("font_size", 12)
+		note_label.add_theme_color_override("font_color", Color(1, 1, 1, 0.45))
+		top.add_child(note_label)
+	var rule := ColorRect.new()
+	rule.color = color
+	rule.custom_minimum_size = Vector2(0, 2)
+	box.add_child(rule)
+	var body_label := Label.new()
+	body_label.text = body
+	body_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	body_label.custom_minimum_size = Vector2(250, 0)
+	body_label.add_theme_font_size_override("font_size", 14)
+	body_label.add_theme_color_override("font_color", Color("f4ecd8"))
+	box.add_child(body_label)
+	return box
+
+
 func _init() -> void:
+	header.slot = self
 	header.flat = true
 	header.focus_mode = Control.FOCUS_NONE
 	header.clip_text = true
@@ -123,6 +166,11 @@ func _can_drop_data(_at_position: Vector2, data: Variant) -> bool:
 
 func _drop_data(_at_position: Vector2, data: Variant) -> void:
 	card_dropped.emit(data)
+
+
+func _make_custom_tooltip(_for_text: String) -> Object:
+	var info: Array = INFO[effect]
+	return make_tooltip(info[0], info[2], info[1], "SLOT %d" % number)
 
 
 func _on_header_pressed() -> void:

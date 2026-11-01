@@ -1,7 +1,8 @@
-[gd_scene load_steps=4 format=3]
+[gd_scene load_steps=5 format=3]
 
 [ext_resource type="Script" path="res://scripts/main.gd" id="1_main"]
 [ext_resource type="Script" path="res://scripts/board.gd" id="2_board"]
+[ext_resource type="Script" path="res://scripts/pile_button.gd" id="3_pile"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_win"]
 content_margin_left = 32.0
@@ -44,36 +45,64 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-theme_override_constants/margin_left = 40
-theme_override_constants/margin_top = 40
-theme_override_constants/margin_right = 40
-theme_override_constants/margin_bottom = 40
+theme_override_constants/margin_left = 32
+theme_override_constants/margin_top = 20
+theme_override_constants/margin_right = 32
+theme_override_constants/margin_bottom = 20
 
 [node name="Layout" type="HBoxContainer" parent="Margin"]
 layout_mode = 2
-theme_override_constants/separation = 40
+theme_override_constants/separation = 36
 
-[node name="Board" type="Control" parent="Margin/Layout"]
+[node name="BoardColumn" type="VBoxContainer" parent="Margin/Layout"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="TitleRow" type="HBoxContainer" parent="Margin/Layout/BoardColumn"]
+layout_mode = 2
+theme_override_constants/separation = 18
+
+[node name="Title" type="Label" parent="Margin/Layout/BoardColumn/TitleRow"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 26
+text = "Mouse & Cheese"
+
+[node name="HudLabel" type="Label" parent="Margin/Layout/BoardColumn/TitleRow"]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_vertical = 4
+theme_override_font_sizes/font_size = 17
+text = "Turn 1"
+
+[node name="BossLabel" type="Label" parent="Margin/Layout/BoardColumn"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_override_colors/font_color = Color(0.878, 0.345, 0.29, 1)
+theme_override_font_sizes/font_size = 15
+autowrap_mode = 3
+
+[node name="Board" type="Control" parent="Margin/Layout/BoardColumn"]
+unique_name_in_owner = true
+layout_mode = 2
 script = ExtResource("2_board")
+
+[node name="StatusLabel" type="Label" parent="Margin/Layout/BoardColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+modulate = Color(1, 1, 1, 0.7)
+autowrap_mode = 3
 
 [node name="Side" type="VBoxContainer" parent="Margin/Layout"]
 layout_mode = 2
 size_flags_horizontal = 3
 theme_override_constants/separation = 14
 
-[node name="TitleRow" type="HBoxContainer" parent="Margin/Layout/Side"]
+[node name="Hud" type="HBoxContainer" parent="Margin/Layout/Side"]
 layout_mode = 2
-theme_override_constants/separation = 20
+theme_override_constants/separation = 12
 
-[node name="Title" type="Label" parent="Margin/Layout/Side/TitleRow"]
-layout_mode = 2
-theme_override_font_sizes/font_size = 30
-text = "Mouse & Cheese"
-
-[node name="TrinketRow" type="HFlowContainer" parent="Margin/Layout/Side/TitleRow"]
+[node name="TrinketRow" type="HFlowContainer" parent="Margin/Layout/Side/Hud"]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
@@ -81,55 +110,28 @@ size_flags_vertical = 4
 theme_override_constants/h_separation = 10
 theme_override_constants/v_separation = 0
 
-[node name="Hud" type="HBoxContainer" parent="Margin/Layout/Side"]
+[node name="TopSpace" type="Control" parent="Margin/Layout/Side"]
 layout_mode = 2
-theme_override_constants/separation = 16
+size_flags_vertical = 3
+size_flags_stretch_ratio = 2.0
 
-[node name="HudLabel" type="Label" parent="Margin/Layout/Side/Hud"]
+[node name="PlayArea" type="VBoxContainer" parent="Margin/Layout/Side"]
+layout_mode = 2
+size_flags_horizontal = 4
+theme_override_constants/separation = 14
+
+[node name="SlotRow" type="HBoxContainer" parent="Margin/Layout/Side/PlayArea"]
 unique_name_in_owner = true
 layout_mode = 2
-text = "Turn 1"
-
-[node name="DrawPileButton" type="Button" parent="Margin/Layout/Side/Hud"]
-unique_name_in_owner = true
-layout_mode = 2
-tooltip_text = "View the cards left in the draw pile"
-focus_mode = 0
-mouse_default_cursor_shape = 2
-text = "Draw pile: 0"
-
-[node name="DiscardButton" type="Button" parent="Margin/Layout/Side/Hud"]
-unique_name_in_owner = true
-layout_mode = 2
-tooltip_text = "View the cards in the discard pile"
-focus_mode = 0
-mouse_default_cursor_shape = 2
-text = "Discard: 0"
-
-[node name="BossLabel" type="Label" parent="Margin/Layout/Side"]
-unique_name_in_owner = true
-visible = false
-layout_mode = 2
-theme_override_colors/font_color = Color(0.878, 0.345, 0.29, 1)
-autowrap_mode = 3
-
-[node name="SlotRow" type="HBoxContainer" parent="Margin/Layout/Side"]
-unique_name_in_owner = true
-layout_mode = 2
+size_flags_horizontal = 4
 theme_override_constants/separation = 8
 
-[node name="EffectsLabel" type="Label" parent="Margin/Layout/Side"]
-unique_name_in_owner = true
+[node name="LockInRow" type="HBoxContainer" parent="Margin/Layout/Side/PlayArea"]
 layout_mode = 2
-modulate = Color(1, 1, 1, 0.8)
-theme_override_font_sizes/font_size = 14
-autowrap_mode = 3
-
-[node name="LockInRow" type="HBoxContainer" parent="Margin/Layout/Side"]
-layout_mode = 2
+size_flags_horizontal = 4
 theme_override_constants/separation = 8
 
-[node name="LockInButton" type="Button" parent="Margin/Layout/Side/LockInRow"]
+[node name="LockInButton" type="Button" parent="Margin/Layout/Side/PlayArea/LockInRow"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(392, 44)
 layout_mode = 2
@@ -137,52 +139,63 @@ size_flags_horizontal = 0
 theme_override_font_sizes/font_size = 20
 text = "Lock In"
 
-[node name="PreviewButton" type="Button" parent="Margin/Layout/Side/LockInRow"]
-unique_name_in_owner = true
-custom_minimum_size = Vector2(120, 44)
+[node name="BottomSpace" type="Control" parent="Margin/Layout/Side"]
 layout_mode = 2
-tooltip_text = "Shows on the board where the cards in the slots would take the mouse, and keeps it up to date as you move them."
-focus_mode = 0
-mouse_default_cursor_shape = 2
-toggle_mode = true
-text = "Preview"
+size_flags_vertical = 3
 
-[node name="HandHeader" type="HBoxContainer" parent="Margin/Layout/Side"]
-custom_minimum_size = Vector2(520, 0)
+[node name="HandArea" type="VBoxContainer" parent="Margin/Layout/Side"]
 layout_mode = 2
-size_flags_horizontal = 0
+size_flags_horizontal = 4
+theme_override_constants/separation = 8
 
-[node name="HandTitle" type="Label" parent="Margin/Layout/Side/HandHeader"]
+[node name="ItemsHeader" type="HBoxContainer" parent="Margin/Layout/Side/HandArea"]
 layout_mode = 2
-size_flags_horizontal = 3
-modulate = Color(1, 1, 1, 0.7)
-text = "Hand"
+theme_override_constants/separation = 10
 
-[node name="PouchRow" type="HBoxContainer" parent="Margin/Layout/Side/HandHeader"]
+[node name="PouchRow" type="HBoxContainer" parent="Margin/Layout/Side/HandArea/ItemsHeader"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_constants/separation = 6
 
-[node name="DiscardCardButton" type="Button" parent="Margin/Layout/Side/HandHeader"]
+[node name="HandRow" type="HBoxContainer" parent="Margin/Layout/Side/HandArea"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="DrawPileButton" type="Button" parent="Margin/Layout/Side/HandArea/HandRow"]
 unique_name_in_owner = true
 layout_mode = 2
-tooltip_text = "Drag a card here, or right-click it, to swap it for a new card."
+size_flags_vertical = 4
+tooltip_text = "Draw pile: the cards left to draw this round. Click to see them."
+script = ExtResource("3_pile")
+
+[node name="Hand" type="HBoxContainer" parent="Margin/Layout/Side/HandArea/HandRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(480, 110)
+layout_mode = 2
+theme_override_constants/separation = 8
+alignment = 1
+
+[node name="DiscardButton" type="Button" parent="Margin/Layout/Side/HandArea/HandRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 4
+tooltip_text = "Discard pile: the cards played or discarded this round. Click to see them, or drop a card here to discard it."
+script = ExtResource("3_pile")
+kind = 1
+
+[node name="DiscardCardButton" type="Button" parent="Margin/Layout/Side/HandArea"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 52)
+layout_mode = 2
+tooltip_text = "Drag a card down here, or right-click it, to swap it for a new card."
 focus_mode = 0
 mouse_default_cursor_shape = 2
-text = "Discard (5 left)"
+theme_override_font_sizes/font_size = 16
+text = "Drag a card here to discard  ·  5 left"
 
-[node name="Hand" type="HBoxContainer" parent="Margin/Layout/Side"]
-unique_name_in_owner = true
-custom_minimum_size = Vector2(520, 110)
+[node name="BottomPad" type="Control" parent="Margin/Layout/Side"]
+custom_minimum_size = Vector2(0, 28)
 layout_mode = 2
-size_flags_horizontal = 0
-theme_override_constants/separation = 8
-
-[node name="StatusLabel" type="Label" parent="Margin/Layout/Side"]
-unique_name_in_owner = true
-layout_mode = 2
-modulate = Color(1, 1, 1, 0.7)
-autowrap_mode = 3
 
 [node name="WinPanel" type="Control" parent="."]
 unique_name_in_owner = true

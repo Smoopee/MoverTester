@@ -67,6 +67,18 @@ func _ready() -> void:
 		tooltip_text = "%s stamp: %s Plays after the slot's own effect." % [info[0], info[1]]
 
 
+## Resizes the card, as it moves between the hand and a slot, which hold different sizes of card.
+func resize(value: Vector2) -> void:
+	card_size = value
+	custom_minimum_size = value
+	queue_redraw()
+
+
+func _make_custom_tooltip(_for_text: String) -> Object:
+	var info: Array = CardSlot.INFO[stamp]
+	return CardSlot.make_tooltip(info[0], info[2], "%s Plays after the slot's own effect." % info[1], "STAMP")
+
+
 func _draw() -> void:
 	var color: Color = COLORS[dir]
 	var zoom := size.x / CARD_SIZE.x
