@@ -11,6 +11,7 @@ const OFFERS_PER_ROW := 2
 const OFFER_SIZE := Vector2(200, 112)
 const SECTION_WIDTH := 150.0
 const PICKER_COLUMNS := 6
+const ICON_SIZE := 22
 
 
 ## One thing for sale this visit.
@@ -207,11 +208,18 @@ func _make_tile(offer: Offer) -> Control:
 	var vbox := VBoxContainer.new()
 	vbox.add_theme_constant_override("separation", 4)
 	tile.add_child(vbox)
+	var name_row := HBoxContainer.new()
+	name_row.add_theme_constant_override("separation", 6)
+	vbox.add_child(name_row)
+	var icon := TextureRect.new()
+	icon.texture = _icon(offer)
+	icon.stretch_mode = TextureRect.STRETCH_KEEP_CENTERED
+	name_row.add_child(icon)
 	var name_label := Label.new()
 	name_label.text = info[0]
 	name_label.add_theme_color_override("font_color", info[3])
 	name_label.add_theme_font_size_override("font_size", 16)
-	vbox.add_child(name_label)
+	name_row.add_child(name_label)
 	var description := Label.new()
 	description.text = info[1]
 	description.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -236,6 +244,15 @@ func _info(offer: Offer) -> Array:
 			return Items.CONSUMABLES[offer.id] + [Items.CONSUMABLE_COLOR]
 	var effect: Array = CardSlot.INFO[offer.id]
 	return ["%s STAMP" % effect[0], effect[1], Items.STAMP_PRICE, effect[2]]
+
+
+func _icon(offer: Offer) -> ItemIcon:
+	match offer.kind:
+		Kind.TRINKET:
+			return ItemIcon.trinket(offer.id, ICON_SIZE)
+		Kind.CONSUMABLE:
+			return ItemIcon.consumable(offer.id, ICON_SIZE)
+	return ItemIcon.stamp(offer.id, ICON_SIZE)
 
 
 func _buy(offer: Offer) -> void:

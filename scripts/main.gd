@@ -1009,12 +1009,20 @@ func _refresh_trinkets() -> void:
 		child.queue_free()
 	for trinket in run.trinkets:
 		var info: Array = Items.TRINKETS[trinket]
-		var tag := Label.new()
-		tag.text = info[0]
+		var tag := HBoxContainer.new()
 		tag.tooltip_text = info[1]
 		tag.mouse_filter = Control.MOUSE_FILTER_PASS
-		tag.add_theme_font_size_override("font_size", 12)
-		tag.add_theme_color_override("font_color", Items.TRINKET_COLOR)
+		tag.add_theme_constant_override("separation", 3)
+		var icon := TextureRect.new()
+		icon.texture = ItemIcon.trinket(trinket, 16)
+		icon.stretch_mode = TextureRect.STRETCH_KEEP_CENTERED
+		icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		tag.add_child(icon)
+		var label := Label.new()
+		label.text = info[0]
+		label.add_theme_font_size_override("font_size", 12)
+		label.add_theme_color_override("font_color", Items.TRINKET_COLOR)
+		tag.add_child(label)
 		trinket_row.add_child(tag)
 
 
@@ -1027,6 +1035,7 @@ func _refresh_pouch() -> void:
 		var info: Array = Items.CONSUMABLES[run.pouch[i]]
 		var button := Button.new()
 		button.text = info[0]
+		button.icon = ItemIcon.consumable(run.pouch[i], 16)
 		button.tooltip_text = "%s Click to use." % info[1]
 		button.focus_mode = Control.FOCUS_NONE
 		button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
