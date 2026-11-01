@@ -285,6 +285,7 @@ func _build_items_tab(box: VBoxContainer) -> void:
 		var info: Array = Items.TRINKETS[trinket]
 		var check := CheckBox.new()
 		check.text = info[0]
+		check.icon = ItemIcon.trinket(trinket)
 		check.tooltip_text = info[1]
 		check.focus_mode = Control.FOCUS_NONE
 		check.add_theme_color_override("font_color", Items.TRINKET_COLOR)
@@ -299,6 +300,7 @@ func _build_items_tab(box: VBoxContainer) -> void:
 			game.run.pouch.append(item)
 			game.refresh_ui()
 			_did("Added %s to the pouch" % Items.CONSUMABLES[item][0]))
+		button.icon = ItemIcon.consumable(item)
 		button.tooltip_text = Items.CONSUMABLES[item][1]
 		button.add_theme_color_override("font_color", Items.CONSUMABLE_COLOR)
 	_button(row, "Clear pouch", func() -> void:

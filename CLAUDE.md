@@ -133,6 +133,9 @@ pays `Boss.WIN_CRUMBS` and offers a free trinket.
   this and the next boss, bosses beaten).
 - `scripts/items.gd` — `Items`: shop content, meaning the `Trinket` and `Consumable` enums with
   name / description / price tables, and the `STAMPS` the shop offers.
+- `scripts/item_icon.gd` — `ItemIcon`: a `Texture2D` that draws a trinket's, consumable's or stamp's
+  symbol in code (`ItemIcon.trinket(id)`, ...), so it works as a `Button.icon` or in a `TextureRect`.
+  A new trinket or consumable needs a symbol in `_draw_trinket` / `_draw_consumable`.
 - `scripts/shop.gd` — `Shop`: overlay after a won round. Rolls offers, sells them, and picks the card
   for a stamp.
 - `scripts/pile_button.gd` — `PileButton`: the draw and discard piles either side of the hand, drawn
