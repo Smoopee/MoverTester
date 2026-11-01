@@ -120,6 +120,16 @@ layout_mode = 2
 size_flags_horizontal = 4
 theme_override_constants/separation = 14
 
+[node name="SkillRow" type="HBoxContainer" parent="Margin/Layout/Side/PlayArea"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 4
+theme_override_constants/separation = 16
+
+[node name="SkillGap" type="Control" parent="Margin/Layout/Side/PlayArea"]
+custom_minimum_size = Vector2(0, 4)
+layout_mode = 2
+
 [node name="SlotRow" type="HBoxContainer" parent="Margin/Layout/Side/PlayArea"]
 unique_name_in_owner = true
 layout_mode = 2

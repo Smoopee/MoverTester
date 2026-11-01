@@ -1,9 +1,9 @@
 class_name ItemIcon
 extends Texture2D
-## A small symbol for a trinket, consumable or card stamp, drawn in code in the item's color. It's a
-## texture, so it goes wherever one does: Button.icon, TextureRect.
+## A small symbol for a trinket, skill, consumable or card stamp, drawn in code in the item's color.
+## It's a texture, so it goes wherever one does: Button.icon, TextureRect.
 
-enum Kind { TRINKET, CONSUMABLE, STAMP }
+enum Kind { TRINKET, SKILL, CONSUMABLE, STAMP }
 
 const SIZE := 18
 ## The symbols are drawn in a box this wide, centred on the origin, then scaled to fit.
@@ -11,7 +11,7 @@ const BOX := 24.0
 const ELLIPSE_POINTS := 20
 
 var kind: Kind
-## Items.Trinket, Items.Consumable or CardSlot.Effect, depending on kind.
+## Items.Trinket, Items.Skill, Items.Consumable or CardSlot.Effect, depending on kind.
 var id: int
 var color: Color
 ## Width and height in pixels.
@@ -26,6 +26,10 @@ var _modulate: Color
 
 static func trinket(trinket_id: Items.Trinket, px := SIZE) -> ItemIcon:
 	return _make(Kind.TRINKET, trinket_id, Items.TRINKET_COLOR, px)
+
+
+static func skill(skill_id: Items.Skill, px := SIZE) -> ItemIcon:
+	return _make(Kind.SKILL, skill_id, Items.SKILL_COLOR, px)
 
 
 static func consumable(consumable_id: Items.Consumable, px := SIZE) -> ItemIcon:
@@ -79,6 +83,8 @@ func _paint(to_canvas_item: RID, rect: Rect2, modulate: Color) -> void:
 	match kind:
 		Kind.TRINKET:
 			_draw_trinket(id, dark)
+		Kind.SKILL:
+			_draw_skill(id, dark)
 		Kind.CONSUMABLE:
 			_draw_consumable(id, dark)
 		Kind.STAMP:
@@ -139,6 +145,26 @@ func _draw_trinket(trinket_id: int, dark: Color) -> void:
 				_ellipse(Vector2(-3, y), Vector2(1.6, 3), -0.6, color)
 				_ellipse(Vector2(3, y), Vector2(1.6, 3), 0.6, color)
 			_ellipse(Vector2(0, -8.5), Vector2(1.6, 3), 0.0, color)
+
+
+func _draw_skill(skill_id: int, dark: Color) -> void:
+	match skill_id:
+		Items.Skill.WARP:
+			# Off the board's right edge, and back in on the left.
+			var edge := Color(color, 0.45)
+			_rect(Rect2(-11, -10, 2.2, 20), edge)
+			_rect(Rect2(8.8, -10, 2.2, 20), edge)
+			_line([Vector2(-4, -4.5), Vector2(11.5, -4.5)], 2.2, color)
+			_line([Vector2(-11.5, 4.5), Vector2(3, 4.5)], 2.2, color)
+			_polygon([Vector2(8, 4.5), Vector2(2.5, 0.5), Vector2(2.5, 8.5)], color)
+		Items.Skill.EFFICIENT:
+			# Crumbs, and a card with a plus: a crumb buys a discard.
+			_circle(Vector2(-6, 5.5), 3.2, color)
+			_circle(Vector2(-9.5, 1), 2.2, color)
+			_circle(Vector2(-3.5, 0.5), 2, color)
+			_rect(Rect2(1.5, -9, 9.5, 14), color)
+			_line([Vector2(6.25, -5), Vector2(6.25, 1)], 1.8, dark)
+			_line([Vector2(3.25, -2), Vector2(9.25, -2)], 1.8, dark)
 
 
 func _draw_consumable(consumable_id: int, dark: Color) -> void:

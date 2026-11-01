@@ -1,7 +1,7 @@
 class_name Run
 extends RefCounted
 ## Everything that carries from round to round until the mouse is caught: the deck, crumbs, trinkets,
-## the pouch of consumables, and the card slots and hand size that chests add to.
+## skills, the pouch of consumables, and the card slots and hand size that chests add to.
 
 const START_SLOTS := 4
 const MAX_SLOTS := 8
@@ -17,6 +17,8 @@ var round_number := 0
 var crumbs := 0
 ## Owned Items.Trinket values.
 var trinkets: Array[int] = []
+## Owned Items.Skill values, at most Items.SKILL_SLOTS, in the order they fill the skill slots.
+var skills: Array[int] = []
 ## Held Items.Consumable values, at most Items.POUCH_SIZE.
 var pouch: Array[int] = []
 ## This round's Boss.Kind, or -1 in a normal round.
@@ -32,3 +34,7 @@ func _init() -> void:
 
 func has(trinket: Items.Trinket) -> bool:
 	return trinket in trinkets
+
+
+func has_skill(skill: Items.Skill) -> bool:
+	return skill in skills

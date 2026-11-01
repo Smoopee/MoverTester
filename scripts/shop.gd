@@ -1,15 +1,16 @@
 class_name Shop
 extends Control
-## Overlay between rounds where crumbs buy trinkets, consumables and card stamps. Opens after each won
-## round; Next Round closes it and starts the next one.
+## Overlay between rounds where crumbs buy trinkets, skills, consumables and card stamps. Opens after
+## each won round; Next Round closes it and starts the next one.
 
 signal next_round_pressed
 
-enum Kind { TRINKET, CONSUMABLE, STAMP }
+enum Kind { TRINKET, SKILL, CONSUMABLE, STAMP }
 
 const OFFERS_PER_ROW := 2
 const OFFER_SIZE := Vector2(200, 112)
-const SECTION_WIDTH := 150.0
+## The sections (trinkets, skills, consumables, stamps) are laid out in a grid this many wide.
+const SECTION_COLUMNS := 2
 const PICKER_COLUMNS := 6
 const ICON_SIZE := 22
 
@@ -17,7 +18,7 @@ const ICON_SIZE := 22
 ## One thing for sale this visit.
 class Offer:
 	var kind: Kind
-	## Items.Trinket, Items.Consumable or CardSlot.Effect, depending on kind.
+	## Items.Trinket, Items.Skill, Items.Consumable or CardSlot.Effect, depending on kind.
 	var id: int
 	var price: int
 	var sold := false
@@ -35,9 +36,10 @@ var _title := Label.new()
 var _crumbs_label := Label.new()
 var _boss_label := Label.new()
 var _trinket_hint := Label.new()
-var _sections := VBoxContainer.new()
+var _sections := GridContainer.new()
 var _rows := {}
 var _pouch_label := Label.new()
+var _skills_label := Label.new()
 var _picker := VBoxContainer.new()
 var _picker_title := Label.new()
 var _picker_grid := GridContainer.new()
@@ -90,9 +92,12 @@ func _ready() -> void:
 	_boss_label.add_theme_font_size_override("font_size", 16)
 	vbox.add_child(_boss_label)
 
-	_sections.add_theme_constant_override("separation", 12)
+	_sections.columns = SECTION_COLUMNS
+	_sections.add_theme_constant_override("h_separation", 28)
+	_sections.add_theme_constant_override("v_separation", 16)
 	vbox.add_child(_sections)
 	_add_section(Kind.TRINKET, "Trinkets", "")
+	_add_section(Kind.SKILL, "Skills", "")
 	_add_section(Kind.CONSUMABLE, "Consumables", "")
 	_add_section(Kind.STAMP, "Card stamps", "Puts an effect on one card for good.")
 
@@ -128,6 +133,7 @@ func open(run: Run, free_trinket := false) -> void:
 	_trinket_hint.text = "Boss reward: take one for free." if free_trinket else "Yours for the rest of the run."
 	var trinkets: Array = Items.Trinket.values().filter(func(t: int) -> bool: return not run.has(t))
 	_fill_row(Kind.TRINKET, trinkets, Boss.FREE_TRINKETS if free_trinket else OFFERS_PER_ROW)
+	_fill_row(Kind.SKILL, Items.Skill.values().filter(func(s: int) -> bool: return not run.has_skill(s)))
 	var boss_next := Boss.is_boss_round(run.round_number + 1)
 	_boss_label.visible = boss_next
 	_boss_label.text = "Next round is a boss. %s" % Boss.describe(run.next_boss)
@@ -141,11 +147,12 @@ func open(run: Run, free_trinket := false) -> void:
 	_next_button.grab_focus()
 
 
+## Adds a section to the grid: its title and hint on a line, over its row of offers.
 func _add_section(kind: Kind, title: String, hint: String) -> void:
-	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 10)
-	var labels := VBoxContainer.new()
-	labels.custom_minimum_size = Vector2(SECTION_WIDTH, 0)
+	var section := VBoxContainer.new()
+	section.add_theme_constant_override("separation", 6)
+	var labels := HBoxContainer.new()
+	labels.add_theme_constant_override("separation", 10)
 	var title_label := Label.new()
 	title_label.text = title
 	title_label.add_theme_font_size_override("font_size", 18)
@@ -154,22 +161,23 @@ func _add_section(kind: Kind, title: String, hint: String) -> void:
 	match kind:
 		Kind.TRINKET:
 			hint_label = _trinket_hint
+		Kind.SKILL:
+			hint_label = _skills_label
 		Kind.CONSUMABLE:
 			hint_label = _pouch_label
 		_:
 			hint_label = Label.new()
 	hint_label.text = hint
-	hint_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	hint_label.custom_minimum_size = Vector2(SECTION_WIDTH, 0)
+	hint_label.size_flags_vertical = Control.SIZE_SHRINK_END
 	hint_label.modulate = Color(1, 1, 1, 0.6)
 	hint_label.add_theme_font_size_override("font_size", 13)
 	labels.add_child(hint_label)
-	row.add_child(labels)
+	section.add_child(labels)
 	var offers := HBoxContainer.new()
 	offers.add_theme_constant_override("separation", 10)
-	row.add_child(offers)
+	section.add_child(offers)
 	_rows[kind] = offers
-	_sections.add_child(row)
+	_sections.add_child(section)
 
 
 ## Puts up to count random picks from pool up for sale in the kind's row.
@@ -240,6 +248,8 @@ func _info(offer: Offer) -> Array:
 	match offer.kind:
 		Kind.TRINKET:
 			return Items.TRINKETS[offer.id] + [Items.TRINKET_COLOR]
+		Kind.SKILL:
+			return Items.SKILLS[offer.id] + [Items.SKILL_COLOR]
 		Kind.CONSUMABLE:
 			return Items.CONSUMABLES[offer.id] + [Items.CONSUMABLE_COLOR]
 	var effect: Array = CardSlot.INFO[offer.id]
@@ -250,6 +260,8 @@ func _icon(offer: Offer) -> ItemIcon:
 	match offer.kind:
 		Kind.TRINKET:
 			return ItemIcon.trinket(offer.id, ICON_SIZE)
+		Kind.SKILL:
+			return ItemIcon.skill(offer.id, ICON_SIZE)
 		Kind.CONSUMABLE:
 			return ItemIcon.consumable(offer.id, ICON_SIZE)
 	return ItemIcon.stamp(offer.id, ICON_SIZE)
@@ -268,6 +280,10 @@ func _buy(offer: Offer) -> void:
 				for other in _offers:
 					if other.kind == Kind.TRINKET and other != offer:
 						other.sold = true
+		Kind.SKILL:
+			if _run.has_skill(offer.id) or _run.skills.size() >= Items.SKILL_SLOTS:
+				return
+			_run.skills.append(offer.id)
 		Kind.CONSUMABLE:
 			if _run.pouch.size() >= Items.POUCH_SIZE:
 				return
@@ -323,18 +339,24 @@ func close_picker() -> void:
 	refresh()
 
 
-## Updates the crumbs, the pouch count and the buy buttons. The dev menu calls it after changing the run.
+## Updates the crumbs, the pouch and skill counts and the buy buttons. The dev menu calls it after
+## changing the run.
 func refresh() -> void:
 	if _run == null:
 		return
 	_crumbs_label.text = "%d crumbs" % _run.crumbs
 	var pouch_full := _run.pouch.size() >= Items.POUCH_SIZE
+	var skills_full := _run.skills.size() >= Items.SKILL_SLOTS
 	_pouch_label.text = "Used once, then gone. Pouch %d/%d." % [_run.pouch.size(), Items.POUCH_SIZE]
+	_skills_label.text = "Always on, for the rest of the run. Skills %d/%d." % [_run.skills.size(),
+			Items.SKILL_SLOTS]
 	for offer in _offers:
-		var blocked := offer.kind == Kind.CONSUMABLE and pouch_full
-		var owned := offer.kind == Kind.TRINKET and not offer.sold and _run.has(offer.id)
+		var blocked := offer.kind == Kind.CONSUMABLE and pouch_full or offer.kind == Kind.SKILL and skills_full
+		var owned := not offer.sold and (offer.kind == Kind.TRINKET and _run.has(offer.id)
+				or offer.kind == Kind.SKILL and _run.has_skill(offer.id))
+		var full := "Pouch full" if offer.kind == Kind.CONSUMABLE else "Skills full"
 		var buy := "Take" if offer.price == 0 else "Buy (%d)" % offer.price
-		offer.button.text = "Sold" if offer.sold else ("Owned" if owned else ("Pouch full" if blocked else buy))
+		offer.button.text = "Sold" if offer.sold else ("Owned" if owned else (full if blocked else buy))
 		offer.button.disabled = offer.sold or owned or blocked or offer.price > _run.crumbs
 
 
