@@ -125,13 +125,27 @@ modulate = Color(1, 1, 1, 0.8)
 theme_override_font_sizes/font_size = 14
 autowrap_mode = 3
 
-[node name="LockInButton" type="Button" parent="Margin/Layout/Side"]
+[node name="LockInRow" type="HBoxContainer" parent="Margin/Layout/Side"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="LockInButton" type="Button" parent="Margin/Layout/Side/LockInRow"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(392, 44)
 layout_mode = 2
 size_flags_horizontal = 0
 theme_override_font_sizes/font_size = 20
 text = "Lock In"
+
+[node name="PreviewButton" type="Button" parent="Margin/Layout/Side/LockInRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(120, 44)
+layout_mode = 2
+tooltip_text = "Shows on the board where the cards in the slots would take the mouse, and keeps it up to date as you move them."
+focus_mode = 0
+mouse_default_cursor_shape = 2
+toggle_mode = true
+text = "Preview"
 
 [node name="HandHeader" type="HBoxContainer" parent="Margin/Layout/Side"]
 custom_minimum_size = Vector2(520, 0)

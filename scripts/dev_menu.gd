@@ -585,6 +585,7 @@ func _in_round() -> bool:
 ## Shows what happened and logs it for bug reports.
 func _did(text: String) -> void:
 	BugReport.note("DEV: " + text)
+	game.refresh_preview()
 	_say(text + ".")
 
 
