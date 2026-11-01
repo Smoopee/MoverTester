@@ -3,7 +3,7 @@ extends RefCounted
 ## How hard each round of a run is. The first EASY_ROUNDS rounds are a small board with no
 ## obstacles; after that the board grows and gets more traps and walls each round, and the other
 ## obstacles join one at a time: cats, glue, jump pads, mouse holes, conveyors, locked doors, creaky
-## floorboards, then switches. Every
+## floorboards, switches, then chasms. Every
 ## round has a turn limit, and running out of turns ends the run like being caught.
 
 ## Rounds at the start of a run with no traps or cats.
@@ -56,6 +56,11 @@ const FIRST_SWITCH_ROUND := 11
 const START_SWITCHES := 1
 const ROUNDS_PER_SWITCH := 5
 const MAX_SWITCHES := 3
+## Chasms, some with a bridge (see Main._place_chasms), the same way.
+const FIRST_CHASM_ROUND := 12
+const START_CHASMS := 2
+const ROUNDS_PER_CHASM := 2
+const MAX_CHASMS := 6
 ## The turn limit gives a turn for every CELLS_PER_TURN cells from the mouse to the cheese, plus spare
 ## turns: START_SPARE_TURNS, one fewer every ROUNDS_PER_SPARE_TURN rounds, down to MIN_SPARE_TURNS.
 const CELLS_PER_TURN := 2.5
@@ -116,6 +121,11 @@ static func switches(round_number: int) -> int:
 	return _ramp(round_number, FIRST_SWITCH_ROUND, START_SWITCHES, ROUNDS_PER_SWITCH, MAX_SWITCHES)
 
 
+## Chasms, each a run of cells that may have a bridge.
+static func chasms(round_number: int) -> int:
+	return _ramp(round_number, FIRST_CHASM_ROUND, START_CHASMS, ROUNDS_PER_CHASM, MAX_CHASMS)
+
+
 ## Turns to reach cheese that starts distance steps from the mouse, around the walls and traps.
 static func turn_limit(round_number: int, distance: int) -> int:
 	var spare := maxi(START_SPARE_TURNS - floori((round_number - 1) / float(ROUNDS_PER_SPARE_TURN)),
@@ -132,7 +142,7 @@ static func describe(round_number: int) -> String:
 			[pads(round_number), "jump pad", "jump pads"], [holes(round_number), "hole pair", "hole pairs"],
 			[belts(round_number), "conveyor", "conveyors"], [doors(round_number), "locked door", "locked doors"],
 			[floorboards(round_number), "floorboard", "floorboards"],
-			[switches(round_number), "switch", "switches"]]:
+			[switches(round_number), "switch", "switches"], [chasms(round_number), "chasm", "chasms"]]:
 		var count: int = part[0]
 		if count > 0:
 			parts.append("%d %s" % [count, part[1] if count == 1 else part[2]])

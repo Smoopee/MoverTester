@@ -1,6 +1,6 @@
 class_name Board
 extends Control
-## The grid, the walls, doors and gates, the floor tiles, the mouse, the cheese, the mouse traps, the
+## The grid, the walls, doors and gates, the chasms, the floor tiles, the mouse, the cheese, the mouse traps, the
 ## crumbs, keys and crates, and the cats, all drawn in code.
 
 ## The mouse picked up the crumb on this cell.
@@ -48,6 +48,11 @@ const HOLE_PAIRS: Array[Color] = [Color("4fc3b0"), Color("c792ff"), Color("ff8fa
 const PLANK := Color("c69a63")
 const PLANK_DARK := Color("8f6638")
 const GAP := Color("2a211a")
+## A chasm's pit, the cliff face under its rim, and the rocky rim along the floor.
+const CHASM := Color("16110d")
+const CHASM_CLIFF := Color("3d3026")
+const CHASM_RIM := Color("8f7a5c")
+const ROPE := Color("d8c39a")
 const DOOR := Color("a0522d")
 const DOOR_EDGE := Color("5c2e14")
 const DOOR_WIDTH := 7.0
@@ -151,6 +156,11 @@ var holes: Array[Vector2i] = []
 var floorboards: Array[Vector2i] = []
 ## Gaps where floorboards broke. Nothing can move onto one, though jumps can pass over it.
 var broken: Array[Vector2i] = []
+## Chasm cells, laid in runs a cell wide. Like a gap, nothing can move onto one, though jumps pass over
+## it, so LEAP gets across.
+var chasms: Array[Vector2i] = []
+## Bridges across the chasms: cells in a chasm's run that can be walked on like plain floor.
+var bridges: Array[Vector2i] = []
 ## Jump pads and the hop each one gives: a move that ends on one jumps the mouse by that offset, a
 ## straight line of 2 or more cells, over whatever is in between (see jump_landing).
 var pads: Dictionary[Vector2i, Vector2i] = {}
@@ -248,6 +258,8 @@ func copy_from(other: Board) -> void:
 	holes = other.holes.duplicate()
 	floorboards = other.floorboards.duplicate()
 	broken = other.broken.duplicate()
+	chasms = other.chasms.duplicate()
+	bridges = other.bridges.duplicate()
 	pads = other.pads.duplicate()
 	doors = other.doors.duplicate()
 	keys = other.keys.duplicate()
@@ -296,20 +308,28 @@ func remove_trap(cell: Vector2i) -> void:
 	queue_redraw()
 
 
-## True when the cell has a glue pad, a conveyor, a mouse hole, a floorboard, a gap or a jump pad.
+## True when the cell has a glue pad, a conveyor, a mouse hole, a floorboard, a gap, a jump pad, a
+## chasm or a bridge.
 func has_tile(cell: Vector2i) -> bool:
 	return cell in glue or conveyors.has(cell) or cell in holes or cell in floorboards or cell in broken \
-		or pads.has(cell)
+		or pads.has(cell) or cell in chasms or cell in bridges
 
 
-## Takes the floor tiles, doors, gates, keys, plates and crates off the board, for laying out a new
-## round.
+## True when nothing can move onto the cell, though jumps pass over it: a gap or a chasm.
+func is_gap(cell: Vector2i) -> bool:
+	return cell in broken or cell in chasms
+
+
+## Takes the floor tiles, chasms, bridges, doors, gates, keys, plates and crates off the board, for
+## laying out a new round.
 func clear_layout() -> void:
 	glue = []
 	conveyors = {}
 	holes = []
 	floorboards = []
 	broken = []
+	chasms = []
+	bridges = []
 	pads = {}
 	doors = {}
 	keys = []
@@ -324,8 +344,8 @@ func has_item(cell: Vector2i) -> bool:
 	return cell in keys or cell in plates or cell in crates
 
 
-## Takes any glue pad, conveyor, mouse hole, floorboard, gap or jump pad off the cell. Used by the dev
-## menu.
+## Takes any glue pad, conveyor, mouse hole, floorboard, gap, jump pad, chasm or bridge off the cell.
+## Used by the dev menu.
 func clear_tile(cell: Vector2i) -> void:
 	glue.erase(cell)
 	conveyors.erase(cell)
@@ -333,6 +353,8 @@ func clear_tile(cell: Vector2i) -> void:
 	floorboards.erase(cell)
 	broken.erase(cell)
 	pads.erase(cell)
+	chasms.erase(cell)
+	bridges.erase(cell)
 	plan_cats()
 
 
@@ -480,7 +502,7 @@ func step(dir: Card.Dir, wrap := false) -> bool:
 		tween.tween_property(self, "mouse_pos", Vector2(target), STEP_TIME)
 		if _pushed != -1:
 			tween.parallel().tween_property(self, "_push_shift", Vector2.ZERO, STEP_TIME)
-	elif wrap and not _in_bounds(target) and wrapped not in broken and wrapped not in crates:
+	elif wrap and not _in_bounds(target) and not is_gap(wrapped) and wrapped not in crates:
 		target = wrapped
 		_trail_break()
 		mouse_cell = target
@@ -532,7 +554,7 @@ func _hop_tween() -> Tween:
 
 
 ## Where a jump by offset from a cell lands. A straight jump stops at the first wall, locked door or
-## closed gate, and short of a gap or a crate it would land on, though it can pass over them. A diagonal
+## closed gate, and short of a gap, a chasm or a crate it would land on, though it can pass over them. A diagonal
 ## one (a cell each way) gets around the corner if either way around it is clear of walls, and
 ## otherwise goes as far as it can along one axis.
 func jump_landing(from: Vector2i, offset: Vector2i) -> Vector2i:
@@ -540,7 +562,7 @@ func jump_landing(from: Vector2i, offset: Vector2i) -> Vector2i:
 	var x_step := Vector2i(signi(target.x - from.x), 0)
 	var y_step := Vector2i(0, signi(target.y - from.y))
 	if x_step != Vector2i.ZERO and y_step != Vector2i.ZERO:
-		if target not in broken and target not in crates:
+		if not is_gap(target) and target not in crates:
 			for first: Vector2i in [x_step, y_step]:
 				var corner := from + first
 				if _can_cross(from, corner, squeeze) and _can_cross(corner, target, squeeze):
@@ -553,7 +575,7 @@ func jump_landing(from: Vector2i, offset: Vector2i) -> Vector2i:
 	var at := from
 	while at != target and _can_cross(at, at + step, squeeze):
 		at += step
-	while at != from and (at in broken or at in crates):
+	while at != from and (is_gap(at) or at in crates):
 		at -= step
 	return at
 
@@ -750,13 +772,13 @@ func _in_bounds(cell: Vector2i) -> bool:
 	return cell.x >= 0 and cell.y >= 0 and cell.x < grid and cell.y < grid
 
 
-## True when something can move from a cell onto its neighbor: it's on the board, not a gap, and no
-## wall, locked door or closed gate is in the way unless through_walls.
+## True when something can move from a cell onto its neighbor: it's on the board, not a gap or a
+## chasm, and no wall, locked door or closed gate is in the way unless through_walls.
 func _can_step(from: Vector2i, to: Vector2i, through_walls := false) -> bool:
-	return _can_cross(from, to, through_walls) and to not in broken
+	return _can_cross(from, to, through_walls) and not is_gap(to)
 
 
-## Like _can_step, but a gap is fine: for jumps passing over the cell.
+## Like _can_step, but a gap or a chasm is fine: for jumps passing over the cell.
 func _can_cross(from: Vector2i, to: Vector2i, through_walls := false) -> bool:
 	return _in_bounds(to) and (through_walls or not is_barrier(from, to))
 
@@ -769,7 +791,7 @@ func _mouse_can_step(from: Vector2i, to: Vector2i, keyed := false) -> bool:
 
 ## Like _mouse_can_step, keyed, but a crate on the cell is fine: for pushing it.
 func _mouse_can_reach(from: Vector2i, to: Vector2i, keyed := true) -> bool:
-	return _can_step(from, to, squeeze) or keyed and keys_held > 0 and to not in broken and _in_bounds(to) \
+	return _can_step(from, to, squeeze) or keyed and keys_held > 0 and not is_gap(to) and _in_bounds(to) \
 		and doors.has(wall_between(from, to))
 
 
@@ -841,9 +863,10 @@ func _cell_center(cell: Vector2) -> Vector2:
 	return (cell + Vector2(0.5, 0.5)) * CELL
 
 
-## Draws the cells that change how the mouse moves: floorboards and the gaps they leave, conveyors,
-## mouse holes, glue, jump pads and pressure plates.
+## Draws the cells that change how the mouse moves: chasms and their bridges, floorboards and the gaps
+## they leave, conveyors, mouse holes, glue, jump pads and pressure plates.
 func _draw_floor() -> void:
+	_draw_chasms()
 	for i in plates.size():
 		# A little bigger than a crate, so a pressed plate shows round the crate on it.
 		var plate := Rect2(Vector2(plates[i]) * CELL, Vector2(CELL, CELL)).grow(-3)
@@ -922,6 +945,42 @@ func _draw_floor() -> void:
 			draw_colored_polygon(_ellipse(center + blob[0], blob[1]), GLUE)
 		draw_circle(center + Vector2(-6, -2), 2.0, Color(1, 1, 1, 0.9))
 		draw_circle(center + Vector2(6, -5), 1.2, Color(1, 1, 1, 0.9))
+
+
+## Draws the chasms as one dark pit, with a rocky rim and a cliff face along each side that meets the
+## floor, then the bridges over it: planks across the pit between two ropes.
+func _draw_chasms() -> void:
+	var pit := chasms + bridges
+	for cell in pit:
+		draw_rect(Rect2(Vector2(cell) * CELL, Vector2(CELL, CELL)), CHASM)
+	var half := CELL / 2.0
+	var cliff := PackedVector2Array([Vector2(-half, -half), Vector2(half, -half), Vector2(half, -8),
+		Vector2(8, -10), Vector2(3, -7.5), Vector2(-3, -9.5), Vector2(-9, -7), Vector2(-half, -9)])
+	var rim := PackedVector2Array([Vector2(-half, -half), Vector2(half, -half), Vector2(half, -12),
+		Vector2(9, -13), Vector2(4, -11), Vector2(-2, -13), Vector2(-8, -11.5), Vector2(-half, -12.5)])
+	for cell in pit:
+		for dir: Card.Dir in Card.Dir.values():
+			var next: Vector2i = cell + Card.OFFSETS[dir]
+			if next in pit or not _in_bounds(next):
+				continue
+			draw_set_transform_matrix(_view * Transform2D(Card.ANGLES[dir], _cell_center(Vector2(cell))))
+			draw_colored_polygon(cliff, CHASM_CLIFF)
+			draw_colored_polygon(rim, CHASM_RIM)
+	for cell in bridges:
+		# Drawn crossing up and down, and turned when the chasm runs up and down instead.
+		var turned := cell + Vector2i.UP in pit or cell + Vector2i.DOWN in pit
+		draw_set_transform_matrix(_view * Transform2D(PI / 2 if turned else 0.0, _cell_center(Vector2(cell))))
+		# Planks with the pit showing between them.
+		for y: float in [-11.0, -3.7, 3.7, 11.0]:
+			var plank := Rect2(-11, y - 2.6, 22, 5.2)
+			draw_rect(plank, PLANK)
+			draw_rect(plank, PLANK_DARK, false, 1.0)
+		for x: float in [-12.5, 12.5]:
+			draw_line(Vector2(x, -half), Vector2(x, half), PLANK_DARK, 3.5)
+			draw_line(Vector2(x, -half), Vector2(x, half), ROPE, 2.0)
+			for y: float in [-half + 1.5, half - 1.5]:
+				draw_circle(Vector2(x, y), 2.8, PLANK_DARK)
+	draw_set_transform_matrix(_view)
 
 
 ## Draws the previewed trail as a dashed line through the cells, with a small ring on each side of a
