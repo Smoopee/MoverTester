@@ -29,12 +29,14 @@ var board: Board
 ## Turns each round that reached the cheese took.
 var round_turns: Array[int] = []
 var unfinished := 0
-## Rounds lost to a mouse trap, and to a cat.
+## Rounds lost to a mouse trap, to a cat, and to a shock pylon or flamethrower.
 var caught := 0
 var caught_by_cat := 0
+var blasted := 0
 ## Rounds lost to the turn limit.
 var out_of_time := 0
-## Per round number: [rounds played, won, caught in a trap, caught by a cat, out of time, turns in won rounds].
+## Per round number: [rounds played, won, caught in a trap, caught by a cat, out of time, turns in won
+## rounds, caught by a pylon or flamethrower].
 var round_stats := {}
 ## Crumbs earned in rounds that reached the cheese: the win reward, unused discards and pickups.
 var won_crumbs := 0
@@ -114,7 +116,7 @@ func _play_round() -> void:
 	var crumbs_before: int = main.run.crumbs
 	var number: int = main.run.round_number
 	if number not in round_stats:
-		round_stats[number] = [0, 0, 0, 0, 0, 0]
+		round_stats[number] = [0, 0, 0, 0, 0, 0, 0]
 	var tally: Array = round_stats[number]
 	tally[0] += 1
 	if not board.chests.is_empty():
@@ -144,6 +146,9 @@ func _play_round() -> void:
 	if main.out_of_time:
 		out_of_time += 1
 		tally[4] += 1
+	elif board.is_blasted():
+		blasted += 1
+		tally[6] += 1
 	elif board.caught_by_cat():
 		caught_by_cat += 1
 		tally[3] += 1
@@ -161,8 +166,9 @@ func _play_round() -> void:
 
 ## Greedy bot: for each slot in play order, places the card that brings the mouse closest to the cheese
 ## (by the path around the walls), and only if it gets closer. Ignores distance effects. Never steps
-## straight onto a trap, a cat or a cat's path; if one is in the way and nothing else gets closer, it
-## sidesteps. Returns the effects of the slots it used.
+## straight onto a trap, a cat, a cat's path or the blast of a pylon or flamethrower that goes off this
+## turn; if one is in the way and nothing else gets closer, it sidesteps. Returns the effects of the
+## slots it used.
 func _place_cards() -> Array[CardSlot.Effect]:
 	_refresh_distances()
 	var used: Array[CardSlot.Effect] = []
@@ -180,7 +186,7 @@ func _place_cards() -> Array[CardSlot.Effect]:
 				dir = _best_dir(pos)
 				slot.wild_dir = dir
 			var cell := board.step_target(pos, slot.play_dir(dir))
-			if board.is_deadly(cell):
+			if _unsafe(cell):
 				trap_in_way = trap_in_way or _dist(cell) < _dist(pos)
 			elif _dist(cell) < _dist(best_cell):
 				best = card
@@ -203,13 +209,19 @@ func _sidestep(pos: Vector2i, used: Array[CardSlot.Effect]) -> void:
 			continue
 		for card: Card in main.hand_box.get_children():
 			var cell := board.step_target(pos, slot.play_dir(card.dir))
-			if cell != pos and not board.is_deadly(cell):
+			if cell != pos and not _unsafe(cell):
 				main._place_in_slot(card, slot)
 				placed += 1
 				if slot.effect != CardSlot.Effect.NONE:
 					used.append(slot.effect)
 				return
 		return
+
+
+## True when the bot keeps off the cell: moving there is deadly, or a pylon or flamethrower blasts it at
+## the end of this turn. The bot plays it safe and keeps out of the blast all turn.
+func _unsafe(cell: Vector2i) -> bool:
+	return board.is_deadly(cell) or board.in_blast(cell)
 
 
 func _best_dir(pos: Vector2i) -> Card.Dir:
@@ -248,6 +260,7 @@ func _report() -> void:
 		", every round is round %d (%s)" % [fixed_round, Difficulty.describe(fixed_round)] if fixed_round > 0 else ""])
 	print("Caught in a trap: %d rounds (%.1f%%)" % [caught, 100.0 * caught / max(rounds, 1)])
 	print("Caught by a cat: %d rounds (%.1f%%)" % [caught_by_cat, 100.0 * caught_by_cat / max(rounds, 1)])
+	print("Caught by a pylon or flamethrower: %d rounds (%.1f%%)" % [blasted, 100.0 * blasted / max(rounds, 1)])
 	print("Out of time: %d rounds (%.1f%%)" % [out_of_time, 100.0 * out_of_time / max(rounds, 1)])
 	_report_rounds()
 	if n == 0:
@@ -281,12 +294,13 @@ func _report_rounds() -> void:
 	var numbers := round_stats.keys()
 	numbers.sort()
 	# The board goes last: its description grows with the obstacles.
-	print("\n%-6s %6s %6s %6s %6s %6s %6s  %s" % ["Round", "played", "won%", "trap%", "cat%", "time%",
-		"turns", "Board"])
+	print("\n%-6s %6s %6s %6s %6s %6s %6s %6s  %s" % ["Round", "played", "won%", "trap%", "cat%", "zap%",
+		"time%", "turns", "Board"])
 	for number: int in numbers:
 		var tally: Array = round_stats[number]
 		var played: int = tally[0]
-		print("%-6d %6d %5.1f%% %5.1f%% %5.1f%% %5.1f%% %6s  %s" % [number, played,
+		print("%-6d %6d %5.1f%% %5.1f%% %5.1f%% %5.1f%% %5.1f%% %6s  %s" % [number, played,
 			100.0 * tally[1] / played, 100.0 * tally[2] / played, 100.0 * tally[3] / played,
-			100.0 * tally[4] / played, "-" if tally[1] == 0 else "%.1f" % (float(tally[5]) / tally[1]),
+			100.0 * tally[6] / played, 100.0 * tally[4] / played,
+			"-" if tally[1] == 0 else "%.1f" % (float(tally[5]) / tally[1]),
 			Difficulty.describe(number)])

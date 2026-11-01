@@ -3,7 +3,7 @@ extends RefCounted
 ## How hard each round of a run is. The first EASY_ROUNDS rounds are a small board with no
 ## obstacles; after that the board grows and gets more traps and walls each round, and the other
 ## obstacles join one at a time: cats, glue, jump pads, mouse holes, conveyors, locked doors, creaky
-## floorboards, switches, then chasms. Every
+## floorboards, switches, chasms, shock pylons, then flamethrowers. Every
 ## round has a turn limit, and running out of turns ends the run like being caught.
 
 ## Rounds at the start of a run with no traps or cats.
@@ -61,6 +61,16 @@ const FIRST_CHASM_ROUND := 12
 const START_CHASMS := 2
 const ROUNDS_PER_CHASM := 2
 const MAX_CHASMS := 6
+## Shock pylons (see Main._place_hazards), the same way.
+const FIRST_PYLON_ROUND := 13
+const START_PYLONS := 1
+const ROUNDS_PER_PYLON := 3
+const MAX_PYLONS := 4
+## Flamethrowers, the same way.
+const FIRST_FLAMER_ROUND := 14
+const START_FLAMERS := 1
+const ROUNDS_PER_FLAMER := 3
+const MAX_FLAMERS := 4
 ## The turn limit gives a turn for every CELLS_PER_TURN cells from the mouse to the cheese, plus spare
 ## turns: START_SPARE_TURNS, one fewer every ROUNDS_PER_SPARE_TURN rounds, down to MIN_SPARE_TURNS.
 const CELLS_PER_TURN := 2.5
@@ -126,6 +136,16 @@ static func chasms(round_number: int) -> int:
 	return _ramp(round_number, FIRST_CHASM_ROUND, START_CHASMS, ROUNDS_PER_CHASM, MAX_CHASMS)
 
 
+## Shock pylons, each shocking the cells around it every few turns.
+static func pylons(round_number: int) -> int:
+	return _ramp(round_number, FIRST_PYLON_ROUND, START_PYLONS, ROUNDS_PER_PYLON, MAX_PYLONS)
+
+
+## Flamethrowers, each shooting a jet of flame every few turns.
+static func flamers(round_number: int) -> int:
+	return _ramp(round_number, FIRST_FLAMER_ROUND, START_FLAMERS, ROUNDS_PER_FLAMER, MAX_FLAMERS)
+
+
 ## Turns to reach cheese that starts distance steps from the mouse, around the walls and traps.
 static func turn_limit(round_number: int, distance: int) -> int:
 	var spare := maxi(START_SPARE_TURNS - floori((round_number - 1) / float(ROUNDS_PER_SPARE_TURN)),
@@ -142,7 +162,9 @@ static func describe(round_number: int) -> String:
 			[pads(round_number), "jump pad", "jump pads"], [holes(round_number), "hole pair", "hole pairs"],
 			[belts(round_number), "conveyor", "conveyors"], [doors(round_number), "locked door", "locked doors"],
 			[floorboards(round_number), "floorboard", "floorboards"],
-			[switches(round_number), "switch", "switches"], [chasms(round_number), "chasm", "chasms"]]:
+			[switches(round_number), "switch", "switches"], [chasms(round_number), "chasm", "chasms"],
+			[pylons(round_number), "shock pylon", "shock pylons"],
+			[flamers(round_number), "flamethrower", "flamethrowers"]]:
 		var count: int = part[0]
 		if count > 0:
 			parts.append("%d %s" % [count, part[1] if count == 1 else part[2]])

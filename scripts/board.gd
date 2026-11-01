@@ -1,7 +1,7 @@
 class_name Board
 extends Control
 ## The grid, the walls, doors and gates, the chasms, the floor tiles, the mouse, the cheese, the mouse traps, the
-## crumbs, keys and crates, and the cats, all drawn in code.
+## crumbs, keys and crates, the shock pylons and flamethrowers, and the cats, all drawn in code.
 
 ## The mouse picked up the crumb on this cell.
 signal crumb_collected(cell: Vector2i)
@@ -53,6 +53,22 @@ const CHASM := Color("16110d")
 const CHASM_CLIFF := Color("3d3026")
 const CHASM_RIM := Color("8f7a5c")
 const ROPE := Color("d8c39a")
+## A shock pylon's and a flamethrower's metal, the pylon's coil and sparks, and the flame.
+const MACHINE := Color("6f7782")
+const MACHINE_EDGE := Color("2f343b")
+const COIL := Color("c98a3d")
+const SPARK := Color("4fc8f0")
+const SPARK_CORE := Color("f4fdff")
+const FLAME := Color("ff7a1f")
+const FLAME_CORE := Color("ffd84a")
+const FUEL_TANK := Color("b8402e")
+## How a machine's blast cells are shaded: faintly while it counts down, strongly on the turn it goes
+## off.
+const BLAST_IDLE_ALPHA := 0.08
+const BLAST_ARMED_ALPHA := 0.3
+## A machine's countdown badge on the turn it goes off.
+const ARMED := Color("e8412c")
+const BLAST_TIME := 0.5
 const DOOR := Color("a0522d")
 const DOOR_EDGE := Color("5c2e14")
 const DOOR_WIDTH := 7.0
@@ -161,6 +177,11 @@ var broken: Array[Vector2i] = []
 var chasms: Array[Vector2i] = []
 ## Bridges across the chasms: cells in a chasm's run that can be walked on like plain floor.
 var bridges: Array[Vector2i] = []
+## Shock pylons and flamethrowers. Each counts down at the end of every turn and goes off at 0 (see
+## fire_hazards). Nothing can move onto one's cell, though jumps pass over it.
+var hazards: Array[Hazard] = []
+## The pylon or flamethrower whose blast caught the mouse, if one did.
+var blasted_by: Hazard = null
 ## Jump pads and the hop each one gives: a move that ends on one jumps the mouse by that offset, a
 ## straight line of 2 or more cells, over whatever is in between (see jump_landing).
 var pads: Dictionary[Vector2i, Vector2i] = {}
@@ -198,6 +219,12 @@ var hop := 0.0:
 	set(value):
 		hop = value
 		queue_redraw()
+## The machines going off, and how far through their blast they are, 0 to 1 (see fire_hazards).
+var _blasting: Array[Hazard] = []
+var _blast := 0.0:
+	set(value):
+		_blast = value
+		queue_redraw()
 ## True while the cats walk, so their old paths aren't drawn.
 var _cats_walking := false
 ## The crate in crates being pushed, and how far it's drawn from its cell while it slides there.
@@ -219,8 +246,8 @@ func _ready() -> void:
 
 
 ## With king set, the first cat is the Alley King, a bigger cat that hunts the mouse. The glue,
-## conveyors, holes, floorboards, jump pads, doors, keys and switches are set before this
-## (Main._place_floor, Main._place_locks) and left as they are.
+## conveyors, holes, floorboards, jump pads, doors, keys, switches, pylons and flamethrowers are set
+## before this (Main._place_floor, Main._place_locks, Main._place_hazards) and left as they are.
 func place(mouse: Vector2i, cheese: Vector2i, trap_cells: Array[Vector2i] = [],
 		crumb_cells: Array[Vector2i] = [], cat_cells: Array[Vector2i] = [], king := false,
 		wall_set: Dictionary[Vector3i, bool] = {}) -> void:
@@ -233,6 +260,9 @@ func place(mouse: Vector2i, cheese: Vector2i, trap_cells: Array[Vector2i] = [],
 	stuck = false
 	keys_held = 0
 	_pushed = -1
+	blasted_by = null
+	_blasting.clear()
+	_blast = 0.0
 	crumbs = crumb_cells
 	cats.clear()
 	for cell in cat_cells:
@@ -267,6 +297,10 @@ func copy_from(other: Board) -> void:
 	plates = other.plates.duplicate()
 	gates = other.gates.duplicate()
 	crates = other.crates.duplicate()
+	hazards.clear()
+	for hazard in other.hazards:
+		hazards.append(hazard.copy())
+	blasted_by = other.blasted_by
 	stuck = other.stuck
 	crumbs = other.crumbs.duplicate()
 	chests = other.chests.duplicate()
@@ -309,19 +343,28 @@ func remove_trap(cell: Vector2i) -> void:
 
 
 ## True when the cell has a glue pad, a conveyor, a mouse hole, a floorboard, a gap, a jump pad, a
-## chasm or a bridge.
+## chasm, a bridge, a shock pylon or a flamethrower.
 func has_tile(cell: Vector2i) -> bool:
 	return cell in glue or conveyors.has(cell) or cell in holes or cell in floorboards or cell in broken \
-		or pads.has(cell) or cell in chasms or cell in bridges
+		or pads.has(cell) or cell in chasms or cell in bridges or hazard_at(cell) != null
 
 
-## True when nothing can move onto the cell, though jumps pass over it: a gap or a chasm.
-func is_gap(cell: Vector2i) -> bool:
-	return cell in broken or cell in chasms
+## True when nothing can move onto the cell, though jumps pass over it: a gap, a chasm, a shock pylon
+## or a flamethrower.
+func is_blocked(cell: Vector2i) -> bool:
+	return cell in broken or cell in chasms or hazard_at(cell) != null
 
 
-## Takes the floor tiles, chasms, bridges, doors, gates, keys, plates and crates off the board, for
-## laying out a new round.
+## The shock pylon or flamethrower on the cell, if any.
+func hazard_at(cell: Vector2i) -> Hazard:
+	for hazard in hazards:
+		if hazard.cell == cell:
+			return hazard
+	return null
+
+
+## Takes the floor tiles, chasms, bridges, doors, gates, keys, plates, crates, pylons and flamethrowers
+## off the board, for laying out a new round.
 func clear_layout() -> void:
 	glue = []
 	conveyors = {}
@@ -336,6 +379,7 @@ func clear_layout() -> void:
 	plates = []
 	gates = {}
 	crates = []
+	hazards = []
 	keys_held = 0
 
 
@@ -344,8 +388,8 @@ func has_item(cell: Vector2i) -> bool:
 	return cell in keys or cell in plates or cell in crates
 
 
-## Takes any glue pad, conveyor, mouse hole, floorboard, gap, jump pad, chasm or bridge off the cell.
-## Used by the dev menu.
+## Takes any glue pad, conveyor, mouse hole, floorboard, gap, jump pad, chasm, bridge, shock pylon or
+## flamethrower off the cell. Used by the dev menu.
 func clear_tile(cell: Vector2i) -> void:
 	glue.erase(cell)
 	conveyors.erase(cell)
@@ -355,6 +399,7 @@ func clear_tile(cell: Vector2i) -> void:
 	pads.erase(cell)
 	chasms.erase(cell)
 	bridges.erase(cell)
+	hazards.erase(hazard_at(cell))
 	plan_cats()
 
 
@@ -453,6 +498,67 @@ func move_cats() -> void:
 	queue_redraw()
 
 
+## Counts every shock pylon and flamethrower down a turn. Those that reach 0 go off, catching the mouse
+## if it's in the blast (see blast_cells), then start their countdown over. Returns true if the mouse
+## was caught, and then that blast stays drawn over it.
+func fire_hazards() -> bool:
+	_blasting.clear()
+	for hazard in hazards:
+		hazard.timer -= 1
+		if hazard.timer <= 0:
+			_blasting.append(hazard)
+	if _blasting.is_empty():
+		queue_redraw()
+		return false
+	for hazard in _blasting:
+		if blasted_by == null and not invincible and mouse_cell in blast_cells(hazard):
+			blasted_by = hazard
+	var tween := create_tween()
+	tween.tween_property(self, "_blast", 1.0, BLAST_TIME).from(0.0)
+	if animate:
+		await tween.finished
+	else:
+		tween.kill()
+	for hazard in _blasting:
+		hazard.timer = hazard.period
+	if blasted_by:
+		# Held at its brightest.
+		_blasting.assign([blasted_by])
+		_blast = 0.5
+	else:
+		_blasting.clear()
+		_blast = 0.0
+	return blasted_by != null
+
+
+## The cells a machine's blast reaches: the eight around a shock pylon, walls or not, or a
+## flamethrower's jet of up to Hazard.FLAME_REACH cells the way it points, stopped by the board's edge,
+## a wall, a locked door, a closed gate, a crate or another machine. The jet passes over gaps and
+## chasms.
+func blast_cells(hazard: Hazard) -> Array[Vector2i]:
+	var cells: Array[Vector2i] = []
+	if hazard.kind == Hazard.Kind.PYLON:
+		for y in range(-1, 2):
+			for x in range(-1, 2):
+				var cell := hazard.cell + Vector2i(x, y)
+				if cell != hazard.cell and _in_bounds(cell):
+					cells.append(cell)
+		return cells
+	var at := hazard.cell
+	for i in Hazard.FLAME_REACH:
+		var next: Vector2i = at + Card.OFFSETS[hazard.dir]
+		if not _can_cross(at, next) or next in crates or hazard_at(next) != null:
+			break
+		cells.append(next)
+		at = next
+	return cells
+
+
+## True when a machine that goes off at the end of this turn would catch a mouse on the cell.
+func in_blast(cell: Vector2i) -> bool:
+	return hazards.any(func(hazard: Hazard) -> bool: return hazard.is_armed() and cell in blast_cells(hazard))
+
+
 ## Runs the cheese up to steps cells, each one farther from the mouse, never onto a trap, a crumb, a
 ## chest, a key, a crate, a cat or a cat's path. A cornered cheese stays put.
 func move_cheese(steps: int) -> void:
@@ -502,7 +608,7 @@ func step(dir: Card.Dir, wrap := false) -> bool:
 		tween.tween_property(self, "mouse_pos", Vector2(target), STEP_TIME)
 		if _pushed != -1:
 			tween.parallel().tween_property(self, "_push_shift", Vector2.ZERO, STEP_TIME)
-	elif wrap and not _in_bounds(target) and not is_gap(wrapped) and wrapped not in crates:
+	elif wrap and not _in_bounds(target) and not is_blocked(wrapped) and wrapped not in crates:
 		target = wrapped
 		_trail_break()
 		mouse_cell = target
@@ -562,7 +668,7 @@ func jump_landing(from: Vector2i, offset: Vector2i) -> Vector2i:
 	var x_step := Vector2i(signi(target.x - from.x), 0)
 	var y_step := Vector2i(0, signi(target.y - from.y))
 	if x_step != Vector2i.ZERO and y_step != Vector2i.ZERO:
-		if not is_gap(target) and target not in crates:
+		if not is_blocked(target) and target not in crates:
 			for first: Vector2i in [x_step, y_step]:
 				var corner := from + first
 				if _can_cross(from, corner, squeeze) and _can_cross(corner, target, squeeze):
@@ -575,14 +681,19 @@ func jump_landing(from: Vector2i, offset: Vector2i) -> Vector2i:
 	var at := from
 	while at != target and _can_cross(at, at + step, squeeze):
 		at += step
-	while at != from and (is_gap(at) or at in crates):
+	while at != from and (is_blocked(at) or at in crates):
 		at -= step
 	return at
 
 
-## True when the mouse is caught, in a trap or by a cat.
+## True when the mouse is caught, in a trap, by a cat, or in a pylon's or flamethrower's blast.
 func is_caught() -> bool:
-	return is_trapped() or caught_by_cat()
+	return is_trapped() or caught_by_cat() or is_blasted()
+
+
+## True when a shock pylon or a flamethrower caught the mouse.
+func is_blasted() -> bool:
+	return blasted_by != null
 
 
 ## True when the mouse is on a trap cell.
@@ -775,7 +886,7 @@ func _in_bounds(cell: Vector2i) -> bool:
 ## True when something can move from a cell onto its neighbor: it's on the board, not a gap or a
 ## chasm, and no wall, locked door or closed gate is in the way unless through_walls.
 func _can_step(from: Vector2i, to: Vector2i, through_walls := false) -> bool:
-	return _can_cross(from, to, through_walls) and not is_gap(to)
+	return _can_cross(from, to, through_walls) and not is_blocked(to)
 
 
 ## Like _can_step, but a gap or a chasm is fine: for jumps passing over the cell.
@@ -791,7 +902,7 @@ func _mouse_can_step(from: Vector2i, to: Vector2i, keyed := false) -> bool:
 
 ## Like _mouse_can_step, keyed, but a crate on the cell is fine: for pushing it.
 func _mouse_can_reach(from: Vector2i, to: Vector2i, keyed := true) -> bool:
-	return _can_step(from, to, squeeze) or keyed and keys_held > 0 and not is_gap(to) and _in_bounds(to) \
+	return _can_step(from, to, squeeze) or keyed and keys_held > 0 and not is_blocked(to) and _in_bounds(to) \
 		and doors.has(wall_between(from, to))
 
 
@@ -831,6 +942,8 @@ func _draw() -> void:
 	if not _cats_walking:
 		for cat in cats:
 			_draw_cat_path(cat)
+	for hazard in hazards:
+		_draw_blast_zone(hazard)
 	_draw_walls()
 	_draw_locks()
 	_draw_cheese(_cell_center(cheese_pos))
@@ -846,6 +959,11 @@ func _draw() -> void:
 		_draw_trap(_cell_center(Vector2(trap)), snapped and trap == mouse_cell)
 	for i in crates.size():
 		_draw_crate(_cell_center(Vector2(crates[i]) + (_push_shift if i == _pushed else Vector2.ZERO)))
+	for hazard in hazards:
+		if hazard.kind == Hazard.Kind.PYLON:
+			_draw_pylon(hazard)
+		else:
+			_draw_flamer(hazard)
 	_draw_preview_trail()
 	var center := _cell_center(mouse_pos)
 	if hop > 0.0:
@@ -856,6 +974,8 @@ func _draw() -> void:
 		_draw_steel(_offset(bar, center), 2.5)
 	for cat in cats:
 		_draw_cat(_cell_center(cat.pos), cat.facing, cat.hunter)
+	for hazard in _blasting:
+		_draw_blast(hazard)
 	_draw_preview_end()
 
 
@@ -1169,6 +1289,112 @@ func _offset(points: PackedVector2Array, by: Vector2) -> PackedVector2Array:
 	for point in points:
 		result.append(point + by)
 	return result
+
+
+## Shades the cells a machine's blast reaches: faintly while it counts down, and strongly, outlined,
+## on the turn it goes off.
+func _draw_blast_zone(hazard: Hazard) -> void:
+	var color := SPARK if hazard.kind == Hazard.Kind.PYLON else FLAME
+	var armed := hazard.is_armed()
+	for cell in blast_cells(hazard):
+		var rect := Rect2(Vector2(cell) * CELL, Vector2(CELL, CELL))
+		draw_rect(rect, Color(color, BLAST_ARMED_ALPHA if armed else BLAST_IDLE_ALPHA))
+		if armed:
+			draw_rect(rect.grow(-1.5), Color(color.darkened(0.3), 0.7), false, 1.5)
+
+
+## Draws a machine's countdown in a round badge: dark while it counts down, red from the turn it goes
+## off.
+func _draw_countdown(center: Vector2, hazard: Hazard) -> void:
+	draw_circle(center, 7.0, ARMED if hazard.timer <= 1 else MACHINE_EDGE)
+	draw_circle(center, 7.0, Color.WHITE, false, 1.0, true)
+	var font := ThemeDB.fallback_font
+	var text := str(hazard.timer)
+	var at := center + Vector2(-font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x / 2.0, 4.5)
+	draw_string(font, at, text, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color.WHITE)
+
+
+## Draws a shock pylon from above: a metal base with a copper coil and four contacts that light up on
+## the turn it goes off, and its countdown in the middle.
+func _draw_pylon(hazard: Hazard) -> void:
+	var center := _cell_center(Vector2(hazard.cell))
+	var base := PackedVector2Array()
+	for i in 6:
+		base.append(center + Vector2.from_angle(TAU * i / 6.0 + PI / 6) * 13.0)
+	draw_colored_polygon(_offset(base, Vector2(1.5, 2)), SHADOW)
+	draw_colored_polygon(base, MACHINE)
+	base.append(base[0])
+	draw_polyline(base, MACHINE_EDGE, 1.5, true)
+	draw_arc(center, 10.0, 0.0, TAU, 24, COIL, 2.5, true)
+	draw_arc(center, 7.5, 0.0, TAU, 24, COIL.darkened(0.3), 1.5, true)
+	for corner: Vector2 in [Vector2(-1, -1), Vector2(1, -1), Vector2(1, 1), Vector2(-1, 1)]:
+		draw_circle(center + corner * 7.5, 1.6, SPARK if hazard.is_armed() else MACHINE_EDGE)
+	_draw_countdown(center, hazard)
+
+
+## Draws a flamethrower from above: a fuel canister with a nozzle pointing the way it fires, its tip
+## lit on the turn it goes off, and its countdown on the canister.
+func _draw_flamer(hazard: Hazard) -> void:
+	var center := _cell_center(Vector2(hazard.cell))
+	var along := Vector2(Card.OFFSETS[hazard.dir])
+	draw_rect(Rect2(center - Vector2(10, 10) + Vector2(1.5, 2), Vector2(20, 20)), SHADOW)
+	draw_set_transform_matrix(_view * Transform2D(Card.ANGLES[hazard.dir], center))
+	var tank := Rect2(-10, -5, 20, 18)
+	draw_rect(tank, FUEL_TANK)
+	for y: float in [-2.0, 10.0]:
+		draw_line(Vector2(-10, y), Vector2(10, y), MACHINE, 2.0)
+	draw_rect(tank, MACHINE_EDGE, false, 1.5)
+	draw_rect(Rect2(-3.5, -14, 7, 9), MACHINE_EDGE)
+	draw_rect(Rect2(-2.5, -13, 5, 8), MACHINE)
+	draw_rect(Rect2(-5, -15.5, 10, 3.5), FLAME if hazard.is_armed() else MACHINE_EDGE)
+	draw_set_transform_matrix(_view)
+	_draw_countdown(center - along * 4.0, hazard)
+
+
+## Draws a machine going off, brightest halfway through the blast: sparks arcing from a pylon to each
+## cell around it, or a jet of flame along a flamethrower's cells.
+func _draw_blast(hazard: Hazard) -> void:
+	var strength := sin(_blast * PI)
+	if strength <= 0.0:
+		return
+	var center := _cell_center(Vector2(hazard.cell))
+	var cells := blast_cells(hazard)
+	if hazard.kind == Hazard.Kind.PYLON:
+		draw_circle(center, CELL * 1.5, Color(SPARK, 0.25 * strength))
+		for i in cells.size():
+			var to := _cell_center(Vector2(cells[i]))
+			var across := (to - center).normalized().orthogonal()
+			var bolt := PackedVector2Array([center])
+			for j in range(1, 4):
+				# A zigzag that shifts as the blast goes on, so the sparks crackle.
+				var wobble := sin(i * 7.3 + j * 3.1 + _blast * 25.0) * 4.0
+				bolt.append(center.lerp(to, j / 4.0) + across * wobble)
+			bolt.append(to)
+			draw_polyline(bolt, Color(SPARK, strength), 3.5, true)
+			draw_polyline(bolt, Color(SPARK_CORE, strength), 1.5, true)
+		return
+	if cells.is_empty():
+		return
+	var along := Vector2(Card.OFFSETS[hazard.dir])
+	var across := along.orthogonal()
+	var start := center + along * 15.0
+	var tip := _cell_center(Vector2(cells[-1])) + along * CELL * 0.4
+	var length := start.distance_to(tip)
+	for layer: Array in [[FLAME, 11.0], [FLAME_CORE, 5.5]]:
+		var color: Color = layer[0]
+		var width: float = layer[1]
+		var side := PackedVector2Array([start + across * width * 0.4])
+		var other_side := PackedVector2Array([start - across * width * 0.4])
+		for j in range(1, 6):
+			var t := j / 5.0
+			# Widest two thirds of the way along, and flickering.
+			var half := width * (0.4 + 0.6 * sin(t * PI * 0.8)) * (1.0 + sin(j * 2.7 + _blast * 30.0) * 0.2)
+			side.append(start + along * length * t + across * half)
+			other_side.append(start + along * length * t - across * half)
+		other_side.reverse()
+		side.append(tip)
+		side.append_array(other_side)
+		draw_colored_polygon(side, Color(color, strength))
 
 
 ## Draws a top-down mouse facing up, rotated to the direction it last moved.

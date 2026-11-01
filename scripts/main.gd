@@ -33,6 +33,8 @@ const BELT_MAX := 4
 ## Cells a jump pad throws the mouse.
 const PAD_MIN := 2
 const PAD_MAX := 4
+## A flamethrower is only placed pointing a way its jet reaches at least this many cells.
+const FLAME_MIN := 2
 ## Runs of wall tried for each locked door or gate (see _place_locks). The one that makes the way to the
 ## cheese longest while shut is kept.
 const LOCK_TRIES := 40
@@ -213,6 +215,7 @@ func new_round() -> void:
 	var walls := _place_walls(mouse, traps)
 	_place_chasms(mouse, cheese, traps)
 	_place_locks(mouse, cheese, traps)
+	_place_hazards(mouse, cheese, traps)
 	_place_floor(mouse, cheese, traps)
 	var crumbs := _place_crumbs(mouse, cheese, traps)
 	var cats := _place_cats(mouse, cheese, traps)
@@ -228,6 +231,7 @@ func new_round() -> void:
 		board.conveyors, board.holes, board.floorboards, board.pads])
 	BugReport.note("Doors %s, keys %s, plates %s, gates %s, crates %s" % [board.doors.keys(), board.keys,
 		board.plates, board.gates, board.crates])
+	BugReport.note("Pylons and flamethrowers: %s" % _hazard_labels())
 	BugReport.note("Cats: %s" % _cat_paths())
 	turn = 1
 	out_of_time = false
@@ -317,6 +321,16 @@ func lock_in() -> void:
 		status_label.text = "The cats prowl..."
 		await board.move_cats()
 		BugReport.note("Cats walked: %s" % _cat_paths())
+	if not ended and not board.hazards.is_empty():
+		var going_off := PackedStringArray()
+		for kind: Hazard.Kind in [Hazard.Kind.PYLON, Hazard.Kind.FLAMER]:
+			if board.hazards.any(func(hazard: Hazard) -> bool: return hazard.kind == kind and hazard.is_armed()):
+				going_off.append("The pylons crackle..." if kind == Hazard.Kind.PYLON else "The flamethrowers roar...")
+		if going_off:
+			status_label.text = " ".join(going_off)
+		ended = await board.fire_hazards()
+		BugReport.note("Pylons and flamethrowers: %s%s" % [_hazard_labels(),
+			", the %s caught the mouse" % Hazard.NAMES[board.blasted_by.kind] if ended else ""])
 	if not ended and turn >= turn_limit:
 		out_of_time = true
 		ended = true
@@ -436,14 +450,18 @@ func _update_preview() -> void:
 	var order := _play_order()
 	var reached := await _play_cards(order, true)
 	var end := Board.PreviewEnd.MOVED
+	# A pylon or flamethrower that goes off at the end of the turn catches a mouse that ends it in the blast.
+	var blasted := board.in_blast(board.mouse_cell) and not board.invincible
 	if board.is_caught():
 		end = Board.PreviewEnd.CAUGHT
 	elif board.mouse_cell == board.cheese_cell:
 		end = Board.PreviewEnd.CHEESE
 	elif board.stuck:
-		end = Board.PreviewEnd.STUCK
+		end = Board.PreviewEnd.CAUGHT if blasted else Board.PreviewEnd.STUCK
 	elif reached < order.size():
 		end = Board.PreviewEnd.RANDOM
+	elif blasted:
+		end = Board.PreviewEnd.CAUGHT
 	BugReport.muted = false
 	board = real
 	_preview_board.recording = false
@@ -462,6 +480,12 @@ func _end_round() -> void:
 		BugReport.note("Out of time on turn %d of round %d" % [turn, run.round_number])
 		win_label.text = "Click! The kitchen light came on." if run.boss == Boss.Kind.KITCHEN_LIGHT \
 			else "Out of time! Someone put the cheese away."
+	elif board.is_blasted():
+		var pylon := board.blasted_by.kind == Hazard.Kind.PYLON
+		BugReport.note("Caught by a %s at %s on turn %d of round %d" % [Hazard.NAMES[board.blasted_by.kind],
+			board.mouse_cell, turn, run.round_number])
+		win_label.text = "Zap! A shock pylon shocked the mouse." if pylon \
+			else "Whoosh! The mouse was caught in a flamethrower's jet."
 	elif board.is_caught():
 		var by_cat := board.caught_by_cat()
 		BugReport.note("Caught %s at %s on turn %d of round %d" % [
@@ -1144,6 +1168,8 @@ func _bug_report_state() -> String:
 	if win_panel.visible:
 		if out_of_time:
 			outcome = "  (out of time)"
+		elif board.is_blasted():
+			outcome = "  (caught by a %s)" % Hazard.NAMES[board.blasted_by.kind]
 		elif board.is_caught():
 			outcome = "  (caught by a cat)" if board.caught_by_cat() else "  (caught in a trap)"
 		else:
@@ -1187,6 +1213,7 @@ func _bug_report_state() -> String:
 		switches.append("plate %s%s opens %s" % [board.plates[i], " (pressed)" if board.is_pressed(i) else "",
 			board.gates.keys().filter(func(gate: Vector3i) -> bool: return board.gates[gate] == i)])
 	lines.append("Switches: %s, crates: %s" % [", ".join(switches), board.crates])
+	lines.append("Pylons and flamethrowers (turns left/period): %s" % _hazard_labels())
 	lines.append("Crumbs on board: %s, chests: %s" % [board.crumbs, board.chests])
 	lines.append("Slots %d, hand size %d, chests opened this round: %s%s" % [run.slots, run.hand_size,
 		", ".join(chest_rewards) if chest_rewards else "-", ", preview on" if preview_on else ""])
@@ -1478,7 +1505,7 @@ func _crate_lane(plate: Vector2i, free: Callable) -> Array[Vector2i]:
 			lane.append(lane[-1] + offset)
 		var behind := lane[-1]
 		var fits := board._in_bounds(behind) and behind != board.cheese_cell and behind not in board.traps \
-			and not board.is_gap(behind) and not board.has_item(behind) and lane.slice(1, -1).all(free)
+			and not board.is_blocked(behind) and not board.has_item(behind) and lane.slice(1, -1).all(free)
 		for i in range(1, lane.size()):
 			fits = fits and not board.is_barrier(lane[i - 1], lane[i])
 		if fits:
@@ -1492,9 +1519,45 @@ static func _edge_cells(edge: Vector3i) -> Array[Vector2i]:
 	return [cell, cell + (Vector2i(1, 0) if edge.z == 0 else Vector2i(0, 1))]
 
 
+## Lays down Difficulty.pylons() shock pylons and Difficulty.flamers() flamethrowers (see Hazard), off
+## the mouse, the cheese, the traps, the chasms, the keys, plates, crates and crate lanes, and not
+## touching each other. Nothing can move onto one, so each goes only where it cuts no cell off from the
+## mouse. A flamethrower points a way its jet reaches at least FLAME_MIN cells. Each starts at a random
+## point in its countdown, but not about to go off on a mouse that starts in its blast.
+func _place_hazards(mouse: Vector2i, cheese: Vector2i, traps: Array[Vector2i]) -> void:
+	var open_cells := board.grid * board.grid - traps.size() - board.chasms.size()
+	for kind: Hazard.Kind in [Hazard.Kind.PYLON, Hazard.Kind.FLAMER]:
+		var count := Difficulty.pylons(run.round_number) if kind == Hazard.Kind.PYLON \
+			else Difficulty.flamers(run.round_number)
+		var placed := 0
+		for attempt in 500:
+			if placed == count:
+				break
+			var cell := _random_cell()
+			if cell == mouse or cell == cheese or cell in traps or board.has_tile(cell) or board.has_item(cell) \
+					or cell in _crate_lanes or board.hazards.any(func(other: Hazard) -> bool: return _touching(cell, other.cell)):
+				continue
+			var hazard := Hazard.new(kind, cell, Card.Dir.UP, randi_range(Hazard.PERIOD_MIN, Hazard.PERIOD_MAX))
+			if kind == Hazard.Kind.FLAMER:
+				var dirs: Array = Card.Dir.values()
+				dirs.shuffle()
+				for dir: Card.Dir in dirs:
+					hazard.dir = dir
+					if board.blast_cells(hazard).size() >= FLAME_MIN:
+						break
+				if board.blast_cells(hazard).size() < FLAME_MIN:
+					continue
+			board.hazards.append(hazard)
+			if board.distances_from(mouse).size() != open_cells - board.hazards.size():
+				board.hazards.pop_back()
+				continue
+			hazard.timer = randi_range(2 if mouse in board.blast_cells(hazard) else 1, hazard.period)
+			placed += 1
+
+
 ## Lays down the round's glue pads, jump pads, mouse holes, conveyor belts and creaky floorboards, at
-## most one on a cell and none on the mouse, the cheese, a trap, a chasm or bridge, a key, plate or
-## crate, or a crate's lane. Linked holes are at least half the board apart. A jump pad throws the mouse its whole way,
+## most one on a cell and none on the mouse, the cheese, a trap, a chasm or bridge, a pylon or
+## flamethrower, a key, plate or crate, or a crate's lane. Linked holes are at least half the board apart. A jump pad throws the mouse its whole way,
 ## with no wall in it, and not onto a trap. A belt runs in a straight line with no walls across it, and
 ## never carries the mouse off the board, into a wall or a chasm, or onto a trap. Floorboards only go where
 ## breaking all of them would still leave every cell reachable, so they can't shut the mouse off from
@@ -1541,7 +1604,7 @@ func _place_floor(mouse: Vector2i, cheese: Vector2i, traps: Array[Vector2i]) -> 
 		for i in randi_range(BELT_MIN, BELT_MAX) - 1:
 			cells.append(cells[-1] + offset)
 		var end := cells[-1] + offset
-		var fits := cells.all(free) and bounds.has_point(end) and end not in traps and not board.is_gap(end)
+		var fits := cells.all(free) and bounds.has_point(end) and end not in traps and not board.is_blocked(end)
 		for cell in cells:
 			fits = fits and not board.is_barrier(cell, cell + offset)
 		if fits:
@@ -1549,7 +1612,7 @@ func _place_floor(mouse: Vector2i, cheese: Vector2i, traps: Array[Vector2i]) -> 
 				board.conveyors[cell] = dir
 			belts += 1
 
-	var open_cells := board.grid * board.grid - traps.size() - board.chasms.size()
+	var open_cells := board.grid * board.grid - traps.size() - board.chasms.size() - board.hazards.size()
 	for attempt in 500:
 		if board.floorboards.size() == Difficulty.floorboards(number):
 			break
@@ -1596,8 +1659,8 @@ func _place_chests(mouse: Vector2i, cheese: Vector2i, traps: Array[Vector2i],
 	return chests
 
 
-## Picks cat cells off the cheese, the traps, the chasms and the crates, well away from the mouse and
-## spread out from each other.
+## Picks cat cells off the cheese, the traps, the chasms, the pylons and flamethrowers and the crates,
+## well away from the mouse and spread out from each other.
 func _place_cats(mouse: Vector2i, cheese: Vector2i, traps: Array[Vector2i]) -> Array[Vector2i]:
 	var cats: Array[Vector2i] = []
 	var spacing := mini(CAT_MIN_DISTANCE, floori(board.grid / 2.0))
@@ -1606,7 +1669,7 @@ func _place_cats(mouse: Vector2i, cheese: Vector2i, traps: Array[Vector2i]) -> A
 			break
 		var cell := _random_cell()
 		if _distance(cell, mouse) < spacing or cell == cheese or cell in traps or cell in board.crates \
-				or board.is_gap(cell):
+				or board.is_blocked(cell):
 			continue
 		if cats.any(func(cat: Vector2i) -> bool: return _distance(cell, cat) < spacing):
 			continue
@@ -1638,6 +1701,14 @@ func _turn_limit(distance: int) -> int:
 ## the straight distance when there's no way through.
 func _path_distance(from: Vector2i, to: Vector2i) -> int:
 	return board.distances_from(from, board.squeeze).get(to, _distance(from, to))
+
+
+## Each pylon's and flamethrower's cell and countdown, for the bug report.
+func _hazard_labels() -> String:
+	var parts := PackedStringArray()
+	for hazard in board.hazards:
+		parts.append(hazard.label())
+	return ", ".join(parts) if not parts.is_empty() else "(none)"
 
 
 ## Each cat's cell and the path it will walk, for the bug report.

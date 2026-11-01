@@ -5,12 +5,13 @@ extends CanvasLayer
 ## so a bug report shows when the state was set up by hand. main.gd only adds it in debug builds.
 
 enum Brush { OFF, MOUSE, CHEESE, TRAP, CRUMB, CAT, WALL, GLUE, CONVEYOR, HOLE, FLOORBOARD, CHEST,
-	JUMP_PAD, DOOR, KEY, PLATE, GATE, CRATE, CHASM }
+	JUMP_PAD, DOOR, KEY, PLATE, GATE, CRATE, CHASM, PYLON, FLAMER }
 
 const KEY := KEY_F2
 const WIDTH := 380
 const BRUSH_NAMES := ["Off", "Mouse", "Cheese", "Trap", "Crumb", "Cat", "Wall", "Glue", "Conveyor",
-	"Mouse hole", "Floorboard", "Chest", "Jump pad", "Locked door", "Key", "Plate", "Gate", "Crate", "Chasm"]
+	"Mouse hole", "Floorboard", "Chest", "Jump pad", "Locked door", "Key", "Plate", "Gate", "Crate", "Chasm",
+	"Shock pylon", "Flamethrower"]
 ## What clicking a cell does with each brush, for the hint under the dropdown.
 const BRUSH_HINTS := {
 	Brush.MOUSE: "moves the mouse there",
@@ -24,7 +25,11 @@ const BRUSH_HINTS := {
 	Brush.PLATE: "adds a pressure plate, or removes one and its gates. Gates open from the last plate added",
 	Brush.GATE: "adds or removes a gate on the side nearest the click, opened by the last plate added",
 	Brush.CHASM: "adds a chasm, turns one into a bridge, or clears a bridge",
+	Brush.PYLON: "adds a shock pylon that goes off every %d turns. Clicking one counts it down a turn, and at 1 removes it" % DEV_HAZARD_PERIOD,
+	Brush.FLAMER: "adds a flamethrower aimed at the side nearest the click, or turns one that way. Clicking the side it aims at counts it down a turn, and at 1 removes it",
 }
+## Turns between going off for a pylon or flamethrower the brush adds.
+const DEV_HAZARD_PERIOD := 3
 ## Labels of the speed dropdown. The last one turns animation off.
 const SPEEDS := ["1x", "2x", "4x", "Instant"]
 const SPEED_SCALES := [1.0, 2.0, 4.0]
@@ -420,6 +425,11 @@ func _build_board_tab(box: VBoxContainer) -> void:
 			game.board.crates.clear()
 			game.board.plan_cats()
 			_did("Cleared the plates, gates and crates")).tooltip_text = "Pressure plates, gates and crates."
+	_button(row, "Machines", func() -> void:
+		if _idle():
+			game.board.hazards.clear()
+			game.board.plan_cats()
+			_did("Cleared the shock pylons and flamethrowers")).tooltip_text = "Shock pylons and flamethrowers."
 	_button(row, "Crumbs", func() -> void:
 		if _idle():
 			game.board.crumbs.clear()
@@ -488,6 +498,19 @@ func _on_cell_clicked(cell: Vector2i, side: Card.Dir) -> void:
 				board.broken.append(cell)
 			elif not was_gap:
 				board.floorboards.append(cell)
+		Brush.PYLON, Brush.FLAMER:
+			var kind := Hazard.Kind.PYLON if _brush == Brush.PYLON else Hazard.Kind.FLAMER
+			var hazard := board.hazard_at(cell)
+			if hazard and hazard.kind == kind and (kind == Hazard.Kind.PYLON or hazard.dir == side):
+				if hazard.timer <= 1:
+					board.hazards.erase(hazard)
+				else:
+					hazard.timer -= 1
+			elif hazard and hazard.kind == kind:
+				hazard.dir = side
+			else:
+				board.clear_tile(cell)
+				board.hazards.append(Hazard.new(kind, cell, side, DEV_HAZARD_PERIOD))
 		Brush.CHASM:
 			var was_chasm := cell in board.chasms
 			var was_bridge := cell in board.bridges
