@@ -4,10 +4,10 @@ A Godot 4.6 deckbuilder prototype. Each turn you draw a hand of direction cards 
 them in slots (4 to start), then Lock In: the mouse moves one cell per card, in slot order, on a square grid until it
 reaches the cheese, within the round's turn limit. Each turn about half the slots roll an **effect** (REVERSED, SLIDE, ECHO, BURN, ...)
 that changes how the card in that slot plays. Slot effects are where the game's content lives.
-Each round also gives `DISCARDS_PER_ROUND` (5) discards: right-click a card, or drag it onto the
-Discard button, to swap it for a new draw (`main.gd` `discard_card`).
+Each round also gives `DISCARDS_PER_ROUND` (5) discards: right-click a card, or drag it down onto the
+discard area under the hand (lit while a card is dragged), to swap it for a new draw (`main.gd` `discard_card`).
 
-The **Preview** toggle next to Lock In draws where the slotted cards would take the mouse, as a dashed
+The **Preview** checkbox in the F2 dev menu (`main.gd` `preview_on`) draws where the slotted cards would take the mouse, as a dashed
 line on the board ending in a ring (red cross if caught, green on the cheese, pale blue in glue, "?"
 before a GAMBLE slot's random move). `main.gd` `_update_preview` plays the turn through the same
 `_play_cards` as `lock_in`, with `board` swapped for a hidden, non-animated copy (`Board.copy_from`)
@@ -95,7 +95,9 @@ pays `Boss.WIN_CRUMBS` and offers a free trinket.
   name / description / price tables, and the `STAMPS` the shop offers.
 - `scripts/shop.gd` — `Shop`: overlay after a won round. Rolls offers, sells them, and picks the card
   for a stamp.
-- `scripts/pile_viewer.gd` — `PileViewer`: overlay opened from the HUD's pile buttons that lists a
+- `scripts/pile_button.gd` — `PileButton`: the draw and discard piles either side of the hand, drawn
+  as a card stack with a count (card back / skull). The discard pile also takes dropped cards.
+- `scripts/pile_viewer.gd` — `PileViewer`: overlay opened from the pile buttons that lists a
   pile's cards, sorted by direction so the draw order stays hidden.
 - `scripts/bug_report.gd` — `BugReport`: F12 panel that saves a description, screenshot, game state
   (`main.gd` `_bug_report_state`) and action log to `bug_reports/` (git-ignored). Log notable events

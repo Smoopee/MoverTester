@@ -37,6 +37,7 @@ var _feedback := Label.new()
 var _seed := SpinBox.new()
 var _next_boss := OptionButton.new()
 var _invincible := CheckBox.new()
+var _preview := CheckBox.new()
 ## Items.Trinket -> its CheckBox.
 var _trinket_boxes := {}
 var _slot_effects: Array[OptionButton] = []
@@ -128,6 +129,7 @@ func _process(_delta: float) -> void:
 	if _next_boss.selected != run.next_boss:
 		_next_boss.select(run.next_boss)
 	_invincible.set_pressed_no_signal(board.invincible)
+	_preview.set_pressed_no_signal(game.preview_on)
 	for trinket: int in _trinket_boxes:
 		(_trinket_boxes[trinket] as CheckBox).set_pressed_no_signal(run.has(trinket))
 	for i in _slot_effects.size():
@@ -234,6 +236,13 @@ func _build_run_tab(box: VBoxContainer) -> void:
 		game.board.queue_redraw()
 		_did("Invincible %s" % ("on" if on else "off")))
 	row.add_child(_invincible)
+	_preview.text = "Preview"
+	_preview.tooltip_text = "Draws on the board where the cards in the slots would take the mouse, and keeps it up to date as you move them."
+	_preview.focus_mode = Control.FOCUS_NONE
+	_preview.toggled.connect(func(on: bool) -> void:
+		game.set_preview(on)
+		_did("Preview %s" % ("on" if on else "off")))
+	row.add_child(_preview)
 	row = _row(box)
 	_button(row, "Copy game state", func() -> void:
 		DisplayServer.clipboard_set(game._bug_report_state())

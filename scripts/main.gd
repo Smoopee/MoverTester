@@ -8,8 +8,9 @@ const CHEST_CHANCE := 0.4
 ## The chest is at least this many cells from the mouse.
 const CHEST_MIN_DISTANCE := 4
 const CHEST_CRUMBS := 5
-## Width of the side column the slots and the hand sit in. Cards shrink so a row of them fits.
+## Width of the row of slots, and of the hand between the piles. Cards shrink so a row of them fits.
 const ROW_WIDTH := 560.0
+const HAND_WIDTH := 480.0
 const SLOT_GAP := 8
 ## The cheese starts at least this many cells from the mouse, or the board's size less 2 if that's smaller.
 const MIN_CHEESE_DISTANCE := 8
@@ -37,6 +38,8 @@ const PIGGY_BANK_MAX := 5
 ## Extra crumbs each crumb picked up on the board pays with BOUNTIFUL HARVEST.
 const HARVEST_CRUMBS := 2
 const HINT := "Click a card to put it in the next slot, or drag it to a slot. Then Lock In."
+## Color of the discard area under the hand, which lights up while a card is dragged.
+const DISCARD_COLOR := Color("e07a5f")
 const PLAYING := Color(1.15, 1.15, 0.8)
 const PLAYED := Color(1, 1, 1, 0.45)
 const FIZZLED := Color(1, 0.5, 0.5, 0.6)
@@ -45,15 +48,13 @@ const FIZZLED := Color(1, 0.5, 0.5, 0.6)
 @onready var hud_label: Label = %HudLabel
 @onready var boss_label: Label = %BossLabel
 @onready var trinket_row: HFlowContainer = %TrinketRow
-@onready var draw_pile_button: Button = %DrawPileButton
-@onready var discard_button: Button = %DiscardButton
+@onready var draw_pile_button: PileButton = %DrawPileButton
+@onready var discard_button: PileButton = %DiscardButton
 @onready var slot_row: HBoxContainer = %SlotRow
-@onready var effects_label: Label = %EffectsLabel
 @onready var hand_box: HBoxContainer = %Hand
 @onready var pouch_row: HBoxContainer = %PouchRow
 @onready var discard_card_button: Button = %DiscardCardButton
 @onready var lock_in_button: Button = %LockInButton
-@onready var preview_button: Button = %PreviewButton
 @onready var status_label: Label = %StatusLabel
 @onready var win_panel: Control = %WinPanel
 @onready var win_label: Label = %WinLabel
@@ -64,8 +65,12 @@ var run := Run.new()
 var pile_viewer := PileViewer.new()
 var shop := Shop.new()
 var slots: Array[CardSlot] = []
-## Size of the cards, smaller when there are more slots or a bigger hand.
-var card_size := Card.CARD_SIZE
+## Size of the cards in the slots, smaller when there are more slots, and in the hand, smaller in a
+## bigger hand. A card resizes as it moves between them.
+var slot_card_size := Card.CARD_SIZE
+var hand_card_size := Card.CARD_SIZE
+## Set from the F2 dev menu: draws on the board where the slotted cards would take the mouse.
+var preview_on := false
 ## The hand size the cards were last sized for (see _build_slots).
 var _built_hand_size := 0
 var turn := 1
@@ -97,15 +102,34 @@ var _preview_board := Board.new()
 var _preview_queued := false
 
 
+## The game's theme: a dark, rounded panel behind every tooltip. It goes on the root window so it
+## reaches the tooltip popups.
+static func _make_theme() -> Theme:
+	var theme := Theme.new()
+	var panel := StyleBoxFlat.new()
+	panel.bg_color = Color("2a2420f2")
+	panel.border_color = Color(1, 1, 1, 0.18)
+	panel.set_border_width_all(1)
+	panel.set_corner_radius_all(8)
+	panel.content_margin_left = 12
+	panel.content_margin_right = 12
+	panel.content_margin_top = 8
+	panel.content_margin_bottom = 10
+	theme.set_stylebox("panel", "TooltipPanel", panel)
+	theme.set_color("font_color", "TooltipLabel", Color("f4ecd8"))
+	return theme
+
+
 func _ready() -> void:
+	get_tree().root.theme = _make_theme()
 	hand_box.set_drag_forwarding(Callable(), _can_drop_on_hand, _drop_on_hand)
+	hand_box.child_entered_tree.connect(func(node: Node) -> void: _fit_card(node, hand_card_size))
 	discard_card_button.set_drag_forwarding(Callable(), _can_drop_on_discard, _drop_on_discard)
+	discard_button.set_drag_forwarding(Callable(), _can_drop_on_discard, _drop_on_discard)
 	discard_card_button.pressed.connect(func() -> void:
-		status_label.text = "Drag a card onto Discard, or right-click it, to swap it for a new one.")
+		status_label.text = "Drag a card down here, or right-click it, to swap it for a new one.")
+	_light_discard_area(false)
 	lock_in_button.pressed.connect(lock_in)
-	preview_button.toggled.connect(func(on: bool) -> void:
-		BugReport.note("Preview %s" % ("on" if on else "off"))
-		refresh_preview())
 	_preview_board.animate = false
 	_preview_board.hide()
 	add_child(_preview_board)
@@ -341,7 +365,7 @@ func _round_over() -> bool:
 	return board.mouse_cell == board.cheese_cell or board.is_caught()
 
 
-## Shows or hides the preview to match the Preview button, at the end of the frame, once however
+## Shows or hides the preview to match preview_on (dev menu), at the end of the frame, once however
 ## many times it's called in the frame.
 func refresh_preview() -> void:
 	if not _preview_queued:
@@ -349,12 +373,12 @@ func refresh_preview() -> void:
 		_update_preview.call_deferred()
 
 
-## While the Preview button is down, plays this turn's cards on a hidden copy of the board and draws
+## While preview_on is set, plays this turn's cards on a hidden copy of the board and draws
 ## where they take the mouse on the board. None of it counts: the crumbs and chests on the way stay
 ## put, and the cards, the status line, THICK FUR and the log are left as they were.
 func _update_preview() -> void:
 	_preview_queued = false
-	if not preview_button.button_pressed or busy or win_panel.visible or shop.visible:
+	if not preview_on or busy or win_panel.visible or shop.visible:
 		board.show_preview([], Board.PreviewEnd.MOVED)
 		return
 	var real := board
@@ -548,16 +572,18 @@ func _build_slots() -> void:
 		column.queue_free()
 	slots.clear()
 	# A slot is its card plus 12 pixels of border. The hand is tighter: cards 4 pixels apart at least.
-	var width := minf((ROW_WIDTH - (count - 1) * SLOT_GAP) / count - 12, (ROW_WIDTH - (hand - 1) * 4) / hand)
-	width = floorf(minf(width, Card.CARD_SIZE.x))
-	card_size = Vector2(width, roundf(width * Card.CARD_SIZE.y / Card.CARD_SIZE.x))
-	hand_box.custom_minimum_size.y = card_size.y
+	slot_card_size = _card_size_for((ROW_WIDTH - (count - 1) * SLOT_GAP) / count - 12)
+	hand_card_size = _card_size_for((HAND_WIDTH - (hand - 1) * 4) / hand)
+	hand_box.custom_minimum_size.y = hand_card_size.y
 	hand_box.add_theme_constant_override("separation",
-		clampi(floori((ROW_WIDTH - hand * width) / (hand - 1)), 4, SLOT_GAP))
+		clampi(floori((HAND_WIDTH - hand * hand_card_size.x) / maxi(hand - 1, 1)), 4, SLOT_GAP))
+	for card in _hand_cards():
+		_fit_card(card, hand_card_size)
 	for i in count:
 		var slot := CardSlot.new()
 		slot.number = i + 1
-		slot.card_size = card_size
+		slot.card_size = slot_card_size
+		slot.child_entered_tree.connect(_fit_card.bind(slot_card_size))
 		slot.card_dropped.connect(_on_card_dropped_on_slot.bind(slot))
 		# A WILD slot's header turns its direction.
 		slot.header.pressed.connect(refresh_preview)
@@ -567,6 +593,18 @@ func _build_slots() -> void:
 		column.add_child(slot)
 		slot_row.add_child(column)
 		slots.append(slot)
+
+
+## A card's size for a width that fits its row: no bigger than Card.CARD_SIZE, in the same proportions.
+func _card_size_for(width: float) -> Vector2:
+	width = floorf(minf(width, Card.CARD_SIZE.x))
+	return Vector2(width, roundf(width * Card.CARD_SIZE.y / Card.CARD_SIZE.x))
+
+
+## Sizes a card that moved into the hand or a slot, which hold different sizes of card.
+func _fit_card(node: Node, fit: Vector2) -> void:
+	if node is Card:
+		node.resize(fit)
 
 
 ## Cards dealt each turn.
@@ -645,7 +683,6 @@ func _roll_effects() -> void:
 		if effect != CardSlot.Effect.LAST and effect != CardSlot.Effect.BLOCKED:
 			after_a_move = true
 		_set_slot_effect(slot, effect)
-	_refresh_effects_label()
 	BugReport.note("Effects: %s" % _slot_effects())
 	refresh_preview()
 
@@ -656,15 +693,6 @@ func _set_slot_effect(slot: CardSlot, effect: CardSlot.Effect) -> void:
 	var card := slot.get_card()
 	if card and effect == CardSlot.Effect.BLOCKED:
 		card.reparent(hand_box, false)
-
-
-func _refresh_effects_label() -> void:
-	var lines := PackedStringArray()
-	for slot in slots:
-		if slot.effect != CardSlot.Effect.NONE:
-			var info: Array = CardSlot.INFO[slot.effect]
-			lines.append("Slot %d  %s: %s" % [slot.number, info[0], info[1]])
-	effects_label.text = "No slot effects this turn." if lines.is_empty() else "\n".join(lines)
 
 
 ## Uses the consumable at index in the pouch.
@@ -680,7 +708,6 @@ func use_consumable(index: int) -> void:
 		Items.Consumable.CALM:
 			for slot in slots:
 				slot.set_effect(CardSlot.Effect.NONE)
-			_refresh_effects_label()
 			BugReport.note("Effects: %s" % _slot_effects())
 			status_label.text = "Calm: no slot effects this turn."
 		Items.Consumable.NEW_PAWS:
@@ -761,7 +788,7 @@ func discard_card(card: Card) -> void:
 func _make_card(data: CardData) -> Card:
 	var card := Card.new()
 	card.data = data
-	card.card_size = card_size
+	card.card_size = hand_card_size
 	card.pressed.connect(_on_card_clicked.bind(card))
 	card.card_dropped_on.connect(_on_card_dropped_on_card.bind(card))
 	card.discard_requested.connect(discard_card.bind(card))
@@ -819,6 +846,30 @@ func _drop_on_discard(_at_position: Vector2, data: Variant) -> void:
 	discard_card(data)
 
 
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_DRAG_BEGIN:
+		var data: Variant = get_viewport().gui_get_drag_data()
+		_light_discard_area(data is Card and not data.disabled and not busy and discards_left > 0)
+	elif what == NOTIFICATION_DRAG_END:
+		_light_discard_area(false)
+
+
+## Styles the discard area under the hand, lit while a card that can be discarded is being dragged.
+func _light_discard_area(lit: bool) -> void:
+	for state in ["normal", "hover", "pressed", "disabled"]:
+		var style := StyleBoxFlat.new()
+		style.bg_color = Color(DISCARD_COLOR, 0.2 if lit else 0.06)
+		style.border_color = Color(DISCARD_COLOR, 0.9 if lit else 0.3)
+		style.set_border_width_all(2)
+		style.set_corner_radius_all(10)
+		if state == "disabled":
+			style.border_color.a = 0.12
+		discard_card_button.add_theme_stylebox_override(state, style)
+	for state in ["font_color", "font_hover_color", "font_pressed_color"]:
+		discard_card_button.add_theme_color_override(state, DISCARD_COLOR.lightened(0.5) if lit
+				else Color(1, 1, 1, 0.6))
+
+
 func _drop_on_hand(_at_position: Vector2, data: Variant) -> void:
 	data.reparent(hand_box, false)
 	BugReport.note("%s -> hand" % data.data.label())
@@ -868,13 +919,14 @@ func _refresh_hud() -> void:
 	boss_label.visible = run.boss != -1
 	if run.boss != -1:
 		boss_label.text = "BOSS  %s" % Boss.describe(run.boss)
-	draw_pile_button.text = "Draw pile: %d" % run.deck.draw_pile.size()
-	discard_button.text = "Discard pile: %d" % run.deck.discard_pile.size()
-	discard_card_button.text = "Discard (%d left)" % discards_left
+	draw_pile_button.count = run.deck.draw_pile.size()
+	discard_button.count = run.deck.discard_pile.size()
+	discard_card_button.text = "Drag a card here to discard  ·  %d left" % discards_left if discards_left > 0 \
+			else "No discards left this round"
 	discard_card_button.disabled = busy or discards_left == 0
 
 
-## Shows the run's trinkets as tags next to the title.
+## Shows the run's trinkets as tags next to the pile buttons.
 func _refresh_trinkets() -> void:
 	board.magnet = run.has(Items.Trinket.CRUMB_MAGNET)
 	for child in trinket_row.get_children():
@@ -917,12 +969,11 @@ func _view_pile(title: String, cards: Array[CardData]) -> void:
 
 # Dev menu: shortcuts the F2 DevMenu calls. The menu logs each one with a "DEV:" note.
 
-## Redraws everything that shows the run: the HUD, pouch, trinkets, slot effects and an open shop.
+## Redraws everything that shows the run: the HUD, pouch, trinkets and an open shop.
 func refresh_ui() -> void:
 	_refresh_hud()
 	_refresh_pouch()
 	_refresh_trinkets()
-	_refresh_effects_label()
 	if shop.visible:
 		shop.refresh()
 	refresh_preview()
@@ -971,8 +1022,12 @@ func set_slot_effect(index: int, effect: CardSlot.Effect) -> void:
 	if busy:
 		return
 	_set_slot_effect(slots[index], effect)
-	_refresh_effects_label()
 	BugReport.note("Effects: %s" % _slot_effects())
+	refresh_preview()
+
+
+func set_preview(on: bool) -> void:
+	preview_on = on
 	refresh_preview()
 
 
@@ -1071,7 +1126,7 @@ func _bug_report_state() -> String:
 	lines.append("Floorboards: %s, broken: %s" % [board.floorboards, board.broken])
 	lines.append("Crumbs on board: %s, chests: %s" % [board.crumbs, board.chests])
 	lines.append("Slots %d, hand size %d, chests opened this round: %s%s" % [run.slots, run.hand_size,
-		", ".join(chest_rewards) if chest_rewards else "-", ", preview on" if preview_button.button_pressed else ""])
+		", ".join(chest_rewards) if chest_rewards else "-", ", preview on" if preview_on else ""])
 	lines.append("Cats: %s" % _cat_paths())
 	for slot in slots:
 		var card := slot.get_card()

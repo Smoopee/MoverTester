@@ -13,10 +13,12 @@ signal cell_clicked(cell: Vector2i, side: Card.Dir)
 
 ## Cells along each side of the biggest board. Early rounds use a smaller one (see Difficulty.grid).
 const MAX_GRID := 20
-## Cell size in pixels on the biggest board. Smaller boards are drawn zoomed in, up to MAX_ZOOM.
+## Cell size the board is drawn in, before it's scaled to SIZE. Smaller boards are drawn zoomed in,
+## up to MAX_ZOOM times the biggest board's cells.
 const CELL := 30
-## Width and height of the board area in pixels, whatever the grid size.
-const SIZE := MAX_GRID * CELL
+## Width and height of the board area in pixels, whatever the grid size. It leaves room above the
+## board for the title and boss rule, and below it for the status line.
+const SIZE := 528.0
 const MAX_ZOOM := 2.0
 const STEP_TIME := 0.25
 const SLIDE_CELL_TIME := 0.05
@@ -89,7 +91,7 @@ var magnet := false
 var grid := MAX_GRID:
 	set(value):
 		grid = value
-		var zoom := minf(float(MAX_GRID) / grid, MAX_ZOOM)
+		var zoom := minf(float(MAX_GRID) / grid, MAX_ZOOM) * SIZE / (MAX_GRID * CELL)
 		var origin := Vector2.ONE * (SIZE - grid * CELL * zoom) / 2.0
 		_view = Transform2D(0.0, Vector2.ONE * zoom, 0.0, origin)
 		queue_redraw()
