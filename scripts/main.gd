@@ -53,6 +53,7 @@ const FIZZLED := Color(1, 0.5, 0.5, 0.6)
 @onready var pouch_row: HBoxContainer = %PouchRow
 @onready var discard_card_button: Button = %DiscardCardButton
 @onready var lock_in_button: Button = %LockInButton
+@onready var preview_button: Button = %PreviewButton
 @onready var status_label: Label = %StatusLabel
 @onready var win_panel: Control = %WinPanel
 @onready var win_label: Label = %WinLabel
@@ -91,6 +92,9 @@ var run_over := false
 ## For the balance sim: false turns boss rounds off, and a Boss.Kind here makes every round that boss.
 var bosses_enabled := true
 var force_boss := -1
+## The hidden board the preview plays the turn on (_update_preview).
+var _preview_board := Board.new()
+var _preview_queued := false
 
 
 func _ready() -> void:
@@ -99,6 +103,12 @@ func _ready() -> void:
 	discard_card_button.pressed.connect(func() -> void:
 		status_label.text = "Drag a card onto Discard, or right-click it, to swap it for a new one.")
 	lock_in_button.pressed.connect(lock_in)
+	preview_button.toggled.connect(func(on: bool) -> void:
+		BugReport.note("Preview %s" % ("on" if on else "off"))
+		refresh_preview())
+	_preview_board.animate = false
+	_preview_board.hide()
+	add_child(_preview_board)
 	win_panel_button.pressed.connect(_on_win_panel_button)
 	# The piles are replaced each round, so look them up when the button is pressed.
 	draw_pile_button.pressed.connect(func() -> void: _view_pile("Draw pile", run.deck.draw_pile))
@@ -197,6 +207,7 @@ func start_turn() -> void:
 	chest_note = ""
 	_refresh_hud()
 	_refresh_pouch()
+	refresh_preview()
 
 
 ## Plays the slotted cards in order, then discards everything and deals a new hand.
@@ -218,47 +229,14 @@ func lock_in() -> void:
 		button.disabled = true
 
 	BugReport.note("Lock in")
-	last_dir = -1
-	board.stuck = false
+	refresh_preview()
 	var order := _play_order()
+	var reached := await _play_cards(order)
 	# Set when the mouse reaches the cheese or is caught in a trap.
-	var ended := false
-	var i := 0
-	while i < order.size() and not ended and not board.stuck:
-		var slot := order[i]
-		var card := slot.get_card()
-		i += 1
-		if card == null:
-			continue
-		card.modulate = PLAYING
-		var partner_slot: CardSlot = order[i] if i < order.size() else null
-		if slot.effect == CardSlot.Effect.DIAGONAL and partner_slot and partner_slot.get_card():
-			var partner := partner_slot.get_card()
-			i += 1
-			partner.modulate = PLAYING
-			var dir := slot.play_dir(card.dir)
-			var partner_dir := partner_slot.play_dir(partner.dir)
-			var offset: Vector2i = Card.OFFSETS[dir] + Card.OFFSETS[partner_dir]
-			last_dir = partner_dir
-			ended = await board.jump(offset, dir)
-			BugReport.note("  Slot %d DIAGONAL %s + slot %d %s %s -> mouse %s" % [
-				slot.number, card.data.label(), partner_slot.number,
-				CardSlot.INFO[partner_slot.effect][0], partner.data.label(), board.mouse_cell])
-			partner.modulate = PLAYED
-		else:
-			ended = await _play(slot, card)
-			# Facing is the last direction moved, which differs from the card for WILD, GAMBLE, etc.
-			BugReport.note("  Slot %d %s%s -> mouse %s" % [slot.number,
-				" ".join(PackedStringArray([CardSlot.INFO[slot.effect][0], card.data.label()])).strip_edges(),
-				" (moved %s)" % Card.NAMES[board.facing] if board.facing != card.dir else "",
-				board.mouse_cell])
-		if ended and _survive_trap():
-			ended = false
-		if card.modulate == PLAYING:
-			card.modulate = PLAYED
+	var ended := _round_over()
 	# Glue holds the mouse: the cards left don't move it.
 	if board.stuck and not ended:
-		for slot in order.slice(i):
+		for slot in order.slice(reached):
 			if slot.get_card():
 				slot.get_card().modulate = FIZZLED
 		status_label.text = "Stuck in glue! The rest of this turn's cards don't move the mouse."
@@ -310,6 +288,111 @@ func lock_in() -> void:
 	start_turn()
 
 
+## Plays the cards in the slots, in order, until the round ends or glue holds the mouse, and returns
+## how many of the slots in order it got through. With preview, it also stops before a card that a
+## GAMBLE slot plays, since that way is random.
+func _play_cards(order: Array[CardSlot], preview := false) -> int:
+	last_dir = -1
+	board.stuck = false
+	var ended := false
+	var i := 0
+	while i < order.size() and not ended and not board.stuck:
+		var slot := order[i]
+		var card := slot.get_card()
+		if card == null:
+			i += 1
+			continue
+		var partner_slot: CardSlot = order[i + 1] if i + 1 < order.size() else null
+		var diagonal := slot.effect == CardSlot.Effect.DIAGONAL and partner_slot and partner_slot.get_card()
+		if preview and (slot.effect == CardSlot.Effect.GAMBLE
+				or diagonal and partner_slot.effect == CardSlot.Effect.GAMBLE):
+			break
+		i += 1
+		card.modulate = PLAYING
+		if diagonal:
+			var partner := partner_slot.get_card()
+			i += 1
+			partner.modulate = PLAYING
+			var dir := slot.play_dir(card.dir)
+			var partner_dir := partner_slot.play_dir(partner.dir)
+			var offset: Vector2i = Card.OFFSETS[dir] + Card.OFFSETS[partner_dir]
+			last_dir = partner_dir
+			ended = await board.jump(offset, dir)
+			BugReport.note("  Slot %d DIAGONAL %s + slot %d %s %s -> mouse %s" % [
+				slot.number, card.data.label(), partner_slot.number,
+				CardSlot.INFO[partner_slot.effect][0], partner.data.label(), board.mouse_cell])
+			partner.modulate = PLAYED
+		else:
+			ended = await _play(slot, card)
+			# Facing is the last direction moved, which differs from the card for WILD, GAMBLE, etc.
+			BugReport.note("  Slot %d %s%s -> mouse %s" % [slot.number,
+				" ".join(PackedStringArray([CardSlot.INFO[slot.effect][0], card.data.label()])).strip_edges(),
+				" (moved %s)" % Card.NAMES[board.facing] if board.facing != card.dir else "",
+				board.mouse_cell])
+		if ended and _survive_trap():
+			ended = false
+		if card.modulate == PLAYING:
+			card.modulate = PLAYED
+	return i
+
+
+## True when the mouse is on the cheese or caught: the round is over.
+func _round_over() -> bool:
+	return board.mouse_cell == board.cheese_cell or board.is_caught()
+
+
+## Shows or hides the preview to match the Preview button, at the end of the frame, once however
+## many times it's called in the frame.
+func refresh_preview() -> void:
+	if not _preview_queued:
+		_preview_queued = true
+		_update_preview.call_deferred()
+
+
+## While the Preview button is down, plays this turn's cards on a hidden copy of the board and draws
+## where they take the mouse on the board. None of it counts: the crumbs and chests on the way stay
+## put, and the cards, the status line, THICK FUR and the log are left as they were.
+func _update_preview() -> void:
+	_preview_queued = false
+	if not preview_button.button_pressed or busy or win_panel.visible or shop.visible:
+		board.show_preview([], Board.PreviewEnd.MOVED)
+		return
+	var real := board
+	var status := status_label.text
+	var fur_used := trap_survived
+	var dir_before := last_dir
+	var cards := _all_cards()
+	var tints: Array[Color] = []
+	for card in cards:
+		tints.append(card.modulate)
+	_preview_board.copy_from(real)
+	_preview_board.trail = [real.mouse_cell]
+	_preview_board.recording = true
+	# The copy doesn't animate, so this plays out within the call and the real board is back at once.
+	board = _preview_board
+	BugReport.muted = true
+	var order := _play_order()
+	var reached := await _play_cards(order, true)
+	var end := Board.PreviewEnd.MOVED
+	if board.is_caught():
+		end = Board.PreviewEnd.CAUGHT
+	elif board.mouse_cell == board.cheese_cell:
+		end = Board.PreviewEnd.CHEESE
+	elif board.stuck:
+		end = Board.PreviewEnd.STUCK
+	elif reached < order.size():
+		end = Board.PreviewEnd.RANDOM
+	BugReport.muted = false
+	board = real
+	_preview_board.recording = false
+	status_label.text = status
+	trap_survived = fur_used
+	last_dir = dir_before
+	for i in cards.size():
+		cards[i].modulate = tints[i]
+	board.show_preview(_preview_board.trail.duplicate(), end)
+
+
 ## Shows how the round ended: crumbs earned and the way to the shop, or the end of the run.
 func _end_round() -> void:
 	run_over = board.is_caught() or out_of_time
@@ -355,6 +438,7 @@ func _end_round() -> void:
 		win_panel_button.text = "Shop"
 	status_label.text = ""
 	win_panel.show()
+	refresh_preview()
 	_refresh_hud()
 	_refresh_pouch()
 	win_panel_button.grab_focus()
@@ -475,6 +559,8 @@ func _build_slots() -> void:
 		slot.number = i + 1
 		slot.card_size = card_size
 		slot.card_dropped.connect(_on_card_dropped_on_slot.bind(slot))
+		# A WILD slot's header turns its direction.
+		slot.header.pressed.connect(refresh_preview)
 		var column := VBoxContainer.new()
 		column.add_theme_constant_override("separation", 2)
 		column.add_child(slot.header)
@@ -561,6 +647,7 @@ func _roll_effects() -> void:
 		_set_slot_effect(slot, effect)
 	_refresh_effects_label()
 	BugReport.note("Effects: %s" % _slot_effects())
+	refresh_preview()
 
 
 func _set_slot_effect(slot: CardSlot, effect: CardSlot.Effect) -> void:
@@ -622,6 +709,7 @@ func use_consumable(index: int) -> void:
 	BugReport.note("Used %s" % item_name)
 	_refresh_hud()
 	_refresh_pouch()
+	refresh_preview()
 
 
 ## Swaps the cards in the hand for new draws. Returns false, changing nothing, when the piles can't
@@ -667,6 +755,7 @@ func discard_card(card: Card) -> void:
 		card.data.label(), new_card.data.label(), discards_left])
 	status_label.text = "Discarded %s, drew %s." % [card.data.label(), new_card.data.label()]
 	_refresh_hud()
+	refresh_preview()
 
 
 func _make_card(data: CardData) -> Card:
@@ -690,6 +779,7 @@ func _on_card_clicked(card: Card) -> void:
 	else:
 		card.reparent(hand_box, false)
 		BugReport.note("%s -> hand" % card.data.label())
+	refresh_preview()
 
 
 func _on_card_dropped_on_slot(card: Card, slot: CardSlot) -> void:
@@ -714,6 +804,7 @@ func _place_in_slot(card: Card, slot: CardSlot) -> void:
 	card.reparent(slot, false)
 	BugReport.note("%s -> slot %d%s" % [card.data.label(), slot.number,
 		" (swapped out %s)" % existing.data.label() if existing else ""])
+	refresh_preview()
 
 
 func _can_drop_on_hand(_at_position: Vector2, data: Variant) -> bool:
@@ -731,6 +822,7 @@ func _drop_on_discard(_at_position: Vector2, data: Variant) -> void:
 func _drop_on_hand(_at_position: Vector2, data: Variant) -> void:
 	data.reparent(hand_box, false)
 	BugReport.note("%s -> hand" % data.data.label())
+	refresh_preview()
 
 
 func _on_crumb_collected(cell: Vector2i) -> void:
@@ -833,6 +925,7 @@ func refresh_ui() -> void:
 	_refresh_effects_label()
 	if shop.visible:
 		shop.refresh()
+	refresh_preview()
 
 
 ## Starts this round over on a new board, as the given Boss.Kind, or as a normal round for -1. The
@@ -880,6 +973,7 @@ func set_slot_effect(index: int, effect: CardSlot.Effect) -> void:
 	_set_slot_effect(slots[index], effect)
 	_refresh_effects_label()
 	BugReport.note("Effects: %s" % _slot_effects())
+	refresh_preview()
 
 
 func reroll_effects() -> void:
@@ -976,8 +1070,8 @@ func _bug_report_state() -> String:
 	lines.append("Mouse holes (linked in pairs): %s" % [board.holes])
 	lines.append("Floorboards: %s, broken: %s" % [board.floorboards, board.broken])
 	lines.append("Crumbs on board: %s, chests: %s" % [board.crumbs, board.chests])
-	lines.append("Slots %d, hand size %d, chests opened this round: %s" % [run.slots, run.hand_size,
-		", ".join(chest_rewards) if chest_rewards else "-"])
+	lines.append("Slots %d, hand size %d, chests opened this round: %s%s" % [run.slots, run.hand_size,
+		", ".join(chest_rewards) if chest_rewards else "-", ", preview on" if preview_button.button_pressed else ""])
 	lines.append("Cats: %s" % _cat_paths())
 	for slot in slots:
 		var card := slot.get_card()

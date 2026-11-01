@@ -68,6 +68,15 @@ const CHEST_GOLD := Color("ffd23f")
 ## How much bigger the Alley King is drawn than a cat.
 const KING_SCALE := 1.3
 const CHEESE_STEP_TIME := 0.2
+const PREVIEW_LINE := Color(0.2, 0.45, 0.85, 0.85)
+const PREVIEW_CHEESE := Color("3fa34d")
+const PREVIEW_CAUGHT := Color("d23c2c")
+## Marks a jump in the trail where the mouse goes from one cell to another without crossing the cells
+## between: out of a mouse hole, or in on the far side with WRAP.
+const TRAIL_BREAK := Vector2i(-1, -1)
+
+## How a previewed turn ends (see show_preview).
+enum PreviewEnd { MOVED, CHEESE, CAUGHT, STUCK, RANDOM }
 
 ## When false, moves finish instantly instead of tweening (used by the headless balance sim).
 var animate := true
@@ -84,7 +93,15 @@ var grid := MAX_GRID:
 		var origin := Vector2.ONE * (SIZE - grid * CELL * zoom) / 2.0
 		_view = Transform2D(0.0, Vector2.ONE * zoom, 0.0, origin)
 		queue_redraw()
-var mouse_cell := Vector2i.ZERO
+var mouse_cell := Vector2i.ZERO:
+	set(value):
+		mouse_cell = value
+		if recording and (trail.is_empty() or trail[-1] != value):
+			trail.append(value)
+## While true, every cell the mouse moves to is added to trail, with TRAIL_BREAK before a hole or a
+## wrap. Main's preview plays the turn on a copy of the board that records.
+var recording := false
+var trail: Array[Vector2i] = []
 var cheese_cell := Vector2i.ZERO
 ## Cheese position in cell units; tweened between cells when RUNAWAY CHEESE moves it.
 var cheese_pos := Vector2.ZERO:
@@ -136,6 +153,9 @@ var hop := 0.0:
 		queue_redraw()
 ## True while the cats walk, so their old paths aren't drawn.
 var _cats_walking := false
+## The previewed way the mouse goes this turn, as a trail, and how it ends (see show_preview).
+var _preview: Array[Vector2i] = []
+var _preview_end := PreviewEnd.MOVED
 ## Maps the grid, drawn with CELL-sized cells, onto the board area: zoomed in and centered when the
 ## grid is small.
 var _view := Transform2D.IDENTITY
@@ -167,6 +187,38 @@ func place(mouse: Vector2i, cheese: Vector2i, trap_cells: Array[Vector2i] = [],
 	plan_cats()
 	facing = Card.Dir.UP
 	mouse_pos = Vector2(mouse)
+
+
+## Makes this board a copy of other, cats included, for Main's preview to play a turn on.
+func copy_from(other: Board) -> void:
+	grid = other.grid
+	mouse_cell = other.mouse_cell
+	cheese_cell = other.cheese_cell
+	walls = other.walls.duplicate()
+	squeeze = other.squeeze
+	traps = other.traps.duplicate()
+	glue = other.glue.duplicate()
+	conveyors = other.conveyors.duplicate()
+	holes = other.holes.duplicate()
+	floorboards = other.floorboards.duplicate()
+	broken = other.broken.duplicate()
+	stuck = other.stuck
+	crumbs = other.crumbs.duplicate()
+	chests = other.chests.duplicate()
+	magnet = other.magnet
+	invincible = other.invincible
+	facing = other.facing
+	cats.clear()
+	for cat in other.cats:
+		cats.append(cat.copy())
+
+
+## Draws trail (from Board.trail) as the way the mouse goes this turn, ending in a mark for how it
+## ends. An empty trail hides the preview.
+func show_preview(trail_cells: Array[Vector2i], end: PreviewEnd) -> void:
+	_preview = trail_cells
+	_preview_end = end
+	queue_redraw()
 
 
 func _gui_input(event: InputEvent) -> void:
@@ -319,6 +371,7 @@ func step(dir: Card.Dir, wrap := false) -> bool:
 		tween.tween_property(self, "mouse_pos", Vector2(target), STEP_TIME)
 	elif wrap and not _in_bounds(target) and wrapped not in broken:
 		target = wrapped
+		_trail_break()
 		mouse_cell = target
 		tween.tween_property(self, "mouse_pos", mouse_pos + Vector2(offset) * 0.5, STEP_TIME / 2)
 		tween.tween_callback(func() -> void: mouse_pos = Vector2(target) - Vector2(offset) * 0.5)
@@ -470,6 +523,7 @@ func _ride() -> bool:
 		var tween: Tween
 		if exit != mouse_cell and not popped_out:
 			BugReport.note("  Down the mouse hole at %s, out at %s" % [mouse_cell, exit])
+			_trail_break()
 			mouse_cell = exit
 			popped_out = true
 			tween = create_tween()
@@ -489,6 +543,11 @@ func _ride() -> bool:
 	if stuck:
 		BugReport.note("  Stuck in glue at %s" % mouse_cell)
 	return false
+
+
+func _trail_break() -> void:
+	if recording:
+		trail.append(TRAIL_BREAK)
 
 
 ## The other end of the mouse hole on the cell, or the cell itself when it isn't a linked hole.
@@ -596,6 +655,7 @@ func _draw() -> void:
 	var snapped := is_trapped() and mouse_pos == Vector2(mouse_cell)
 	for trap in traps:
 		_draw_trap(_cell_center(Vector2(trap)), snapped and trap == mouse_cell)
+	_draw_preview_trail()
 	var center := _cell_center(mouse_pos)
 	if hop > 0.0:
 		draw_colored_polygon(_ellipse(center + Vector2(0, 6), Vector2(9, 4)), SHADOW)
@@ -605,6 +665,7 @@ func _draw() -> void:
 		_draw_steel(_offset(bar, center), 2.5)
 	for cat in cats:
 		_draw_cat(_cell_center(cat.pos), cat.facing, cat.hunter)
+	_draw_preview_end()
 
 
 func _cell_center(cell: Vector2) -> Vector2:
@@ -666,6 +727,44 @@ func _draw_floor() -> void:
 			draw_colored_polygon(_ellipse(center + blob[0], blob[1]), GLUE)
 		draw_circle(center + Vector2(-6, -2), 2.0, Color(1, 1, 1, 0.9))
 		draw_circle(center + Vector2(6, -5), 1.2, Color(1, 1, 1, 0.9))
+
+
+## Draws the previewed trail as a dashed line through the cells, with a small ring on each side of a
+## break (a mouse hole or a wrap).
+func _draw_preview_trail() -> void:
+	for i in range(1, _preview.size()):
+		var from := _preview[i - 1]
+		var to := _preview[i]
+		if to == TRAIL_BREAK:
+			draw_arc(_cell_center(Vector2(from)), 6.0, 0.0, TAU, 16, PREVIEW_LINE, 2.0, true)
+		elif from == TRAIL_BREAK:
+			draw_arc(_cell_center(Vector2(to)), 6.0, 0.0, TAU, 16, PREVIEW_LINE, 2.0, true)
+		else:
+			draw_dashed_line(_cell_center(Vector2(from)), _cell_center(Vector2(to)), PREVIEW_LINE, 3.0, 5.0, true, true)
+
+
+## Marks where the previewed turn ends: a ring where the mouse stops (green on the cheese, pale blue in
+## glue), a red cross where it's caught, or a question mark before a GAMBLE slot's random move.
+func _draw_preview_end() -> void:
+	if _preview.is_empty():
+		return
+	var center := _cell_center(Vector2(_preview[-1]))
+	match _preview_end:
+		PreviewEnd.MOVED:
+			draw_arc(center, 11.0, 0.0, TAU, 24, PREVIEW_LINE, 2.5, true)
+		PreviewEnd.CHEESE:
+			draw_arc(center, 14.0, 0.0, TAU, 24, PREVIEW_CHEESE, 3.5, true)
+		PreviewEnd.STUCK:
+			draw_arc(center, 12.0, 0.0, TAU, 24, GLUE_EDGE, 3.0, true)
+		PreviewEnd.CAUGHT:
+			for corner: Vector2 in [Vector2(1, 1), Vector2(1, -1)]:
+				draw_line(center - corner * 9.0, center + corner * 9.0, STEEL_EDGE, 6.0)
+				draw_line(center - corner * 9.0, center + corner * 9.0, PREVIEW_CAUGHT, 3.5)
+		PreviewEnd.RANDOM:
+			var font := ThemeDB.fallback_font
+			var at := center + Vector2(-6, -8)
+			draw_string_outline(font, at, "?", HORIZONTAL_ALIGNMENT_LEFT, -1, 18, 4, Color.WHITE)
+			draw_string(font, at, "?", HORIZONTAL_ALIGNMENT_LEFT, -1, 18, PREVIEW_LINE)
 
 
 ## Draws each wall as a thick line along its cell edge, with a shadow and round ends so runs of walls

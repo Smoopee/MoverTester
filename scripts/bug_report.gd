@@ -12,6 +12,8 @@ const TOAST_TIME := 3.0
 ## Returns the game state as text for the report. Set by the scene that owns the panel.
 var get_state := Callable()
 
+## While true, note() logs nothing. Main's preview plays the turn with it set.
+static var muted := false
 static var _log: Array[String] = []
 
 var _screenshot: Image
@@ -29,6 +31,8 @@ var _toast_tween: Tween
 
 ## Adds a line to the action log that goes into each report. Only the last LOG_SIZE lines are kept.
 static func note(text: String) -> void:
+	if muted:
+		return
 	var seconds := Time.get_ticks_msec() / 1000.0
 	_log.append("[%02d:%04.1f] %s" % [int(seconds / 60), fmod(seconds, 60.0), text])
 	if _log.size() > LOG_SIZE:

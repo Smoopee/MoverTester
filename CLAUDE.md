@@ -7,6 +7,13 @@ that changes how the card in that slot plays. Slot effects are where the game's 
 Each round also gives `DISCARDS_PER_ROUND` (5) discards: right-click a card, or drag it onto the
 Discard button, to swap it for a new draw (`main.gd` `discard_card`).
 
+The **Preview** toggle next to Lock In draws where the slotted cards would take the mouse, as a dashed
+line on the board ending in a ring (red cross if caught, green on the cheese, pale blue in glue, "?"
+before a GAMBLE slot's random move). `main.gd` `_update_preview` plays the turn through the same
+`_play_cards` as `lock_in`, with `board` swapped for a hidden, non-animated copy (`Board.copy_from`)
+that records the mouse's `trail`, and puts back the card tints, status line, THICK FUR and log after.
+Anything that changes the cards, slots or board calls `refresh_preview()` (the dev menu's `_did` does).
+
 The board has mouse traps, **walls** and roaming **cats**. Walls are segments on cell edges, laid
 in short runs that can turn corners (`main.gd` `_place_walls`, which rejects any run that would cut
 a cell off). Nothing walks, slides or jumps through a wall, except the mouse during a turn of the

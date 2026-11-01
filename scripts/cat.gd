@@ -23,11 +23,23 @@ var path: Array[Vector2i] = []
 var pos := Vector2.ZERO
 
 
-func _init(start: Vector2i) -> void:
+## Without start_heading, the cat starts off heading a random way.
+func _init(start: Vector2i, start_heading: int = -1) -> void:
 	cell = start
 	pos = Vector2(start)
-	heading = Card.Dir.values().pick_random()
+	heading = Card.Dir.values().pick_random() if start_heading == -1 else start_heading as Card.Dir
 	facing = heading
+
+
+## A copy of the cat, path and all.
+func copy() -> Cat:
+	var other := Cat.new(cell, heading)
+	other.steps = steps
+	other.hunter = hunter
+	other.facing = facing
+	other.path = path.duplicate()
+	other.pos = pos
+	return other
 
 
 ## True when the cell is the cat's or on its path.
