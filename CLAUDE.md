@@ -21,6 +21,12 @@ SQUEEZE consumable. Each cat shows the path it will walk this turn; moving onto 
 catches the mouse. After the mouse moves, the cats walk their paths and plan new ones, which never
 cover the mouse's cell, the cheese or a trap.
 
+Later rounds add **chasms** (`main.gd` `_place_chasms`, `board.chasms`): runs of cells a cell wide
+that can turn corners, never on the mouse, cheese or a trap and never touching another chasm. Like a
+gap, nothing can move onto a chasm cell but jumps pass over it, so LEAP crosses one. A chasm that
+would cut a cell off gets a **bridge** (`bridges`, plain floor) on a straight stretch, or is left
+out; others get one with `BRIDGE_CHANCE`. `Board.is_gap` covers gaps and chasms.
+
 Later rounds add **floor tiles** (`main.gd` `_place_floor`), at most one per cell and never on the
 mouse, cheese, a trap or a crumb. They act on the cell a move ends on, except where noted:
 - **Glue**: the mouse sticks for the rest of the turn (`Board.stuck`; `lock_in` fizzles the cards
@@ -53,7 +59,7 @@ shut gates are walls to everything (`Board.is_barrier`), and the turn limit coun
 **Difficulty** (`scripts/difficulty.gd`) rises with the round number: the first two rounds are a
 small board (8x8) with no obstacles, then the grid grows a cell a round up to 20x20 and traps and
 walls are added, and the other obstacles join one at a time: cats (round 4), glue (5), jump pads
-(6), mouse holes (7), conveyors (8), locked doors (9), floorboards (10) and switches (11). Every round has a turn limit, set from the mouse-to-cheese
+(6), mouse holes (7), conveyors (8), locked doors (9), floorboards (10), switches (11) and chasms (12). Every round has a turn limit, set from the mouse-to-cheese
 path length around the walls and traps (`Board.distances_from`) with a few spare turns that shrink
 over the run.
 
@@ -84,7 +90,7 @@ pays `Boss.WIN_CRUMBS` and offers a free trinket.
 - `scripts/card_slot.gd` — `CardSlot`: the `Effect` enum, `INFO` (name / description / color per
   effect) and `play_dir()` for effects that change direction.
 - `scripts/difficulty.gd` — `Difficulty`: the per-round curve (`grid`, `traps`, `walls`, `cats`,
-  `glue`, `pads`, `holes`, `belts`, `doors`, `floorboards`, `switches`, `turn_limit`)
+  `glue`, `pads`, `holes`, `belts`, `doors`, `floorboards`, `switches`, `chasms`, `turn_limit`)
   and its tuning constants. `main.gd` `_turn_limit` applies the boss changes on top.
 - `scripts/board.gd` — `Board`: the `grid` size (smaller boards are drawn zoomed in to fill the same
   area), grid, wall, mouse, cheese, mouse-trap, crumb, chest and cat drawing; `step` / `slide` /
@@ -96,7 +102,7 @@ pays `Boss.WIN_CRUMBS` and offers a free trinket.
   lands and `distances_from` is a BFS around walls and traps (turn limit, SNIFF, the Alley King,
   wall generation, the sim bot). Crumbs emit `crumb_collected`, chests `chest_opened`, keys
   `key_collected`, and a door a key opens `door_unlocked`. `clear_layout` empties the floor tiles,
-  doors, keys and switches before a round is laid out. `move_cats()`
+  chasms, doors, keys and switches before a round is laid out. `move_cats()`
   walks the cats at the end of a turn, `move_cheese()` runs the cheese for RUNAWAY CHEESE;
   `is_deadly(cell)` says whether moving onto a cell is fatal.
 - `scripts/cat.gd` — `Cat`: one roaming cat's cell and this turn's `path` (`steps` cells), and

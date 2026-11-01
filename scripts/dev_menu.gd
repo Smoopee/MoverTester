@@ -5,12 +5,12 @@ extends CanvasLayer
 ## so a bug report shows when the state was set up by hand. main.gd only adds it in debug builds.
 
 enum Brush { OFF, MOUSE, CHEESE, TRAP, CRUMB, CAT, WALL, GLUE, CONVEYOR, HOLE, FLOORBOARD, CHEST,
-	JUMP_PAD, DOOR, KEY, PLATE, GATE, CRATE }
+	JUMP_PAD, DOOR, KEY, PLATE, GATE, CRATE, CHASM }
 
 const KEY := KEY_F2
 const WIDTH := 380
 const BRUSH_NAMES := ["Off", "Mouse", "Cheese", "Trap", "Crumb", "Cat", "Wall", "Glue", "Conveyor",
-	"Mouse hole", "Floorboard", "Chest", "Jump pad", "Locked door", "Key", "Plate", "Gate", "Crate"]
+	"Mouse hole", "Floorboard", "Chest", "Jump pad", "Locked door", "Key", "Plate", "Gate", "Crate", "Chasm"]
 ## What clicking a cell does with each brush, for the hint under the dropdown.
 const BRUSH_HINTS := {
 	Brush.MOUSE: "moves the mouse there",
@@ -23,6 +23,7 @@ const BRUSH_HINTS := {
 	Brush.DOOR: "adds or removes a locked door on the side nearest the click",
 	Brush.PLATE: "adds a pressure plate, or removes one and its gates. Gates open from the last plate added",
 	Brush.GATE: "adds or removes a gate on the side nearest the click, opened by the last plate added",
+	Brush.CHASM: "adds a chasm, turns one into a bridge, or clears a bridge",
 }
 ## Labels of the speed dropdown. The last one turns animation off.
 const SPEEDS := ["1x", "2x", "4x", "Instant"]
@@ -399,11 +400,11 @@ func _build_board_tab(box: VBoxContainer) -> void:
 		if _idle():
 			var board := game.board
 			for cell in board.glue + board.conveyors.keys() + board.holes + board.floorboards + board.broken \
-					+ board.pads.keys():
+					+ board.pads.keys() + board.chasms + board.bridges:
 				board.clear_tile(cell)
 			board.stuck = false
-			_did("Cleared the glue, conveyors, mouse holes, floorboards and jump pads")).tooltip_text = \
-		"Glue, conveyors, mouse holes, floorboards, gaps and jump pads."
+			_did("Cleared the glue, conveyors, mouse holes, floorboards, jump pads and chasms")).tooltip_text = \
+		"Glue, conveyors, mouse holes, floorboards, gaps, jump pads, chasms and bridges."
 	_button(row, "Doors & keys", func() -> void:
 		if _idle():
 			game.board.doors.clear()
@@ -487,6 +488,14 @@ func _on_cell_clicked(cell: Vector2i, side: Card.Dir) -> void:
 				board.broken.append(cell)
 			elif not was_gap:
 				board.floorboards.append(cell)
+		Brush.CHASM:
+			var was_chasm := cell in board.chasms
+			var was_bridge := cell in board.bridges
+			board.clear_tile(cell)
+			if was_chasm:
+				board.bridges.append(cell)
+			elif not was_bridge:
+				board.chasms.append(cell)
 		Brush.MOUSE:
 			board.mouse_cell = cell
 			board.mouse_pos = Vector2(cell)
