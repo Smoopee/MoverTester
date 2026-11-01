@@ -1,12 +1,16 @@
 class_name Board
 extends Control
-## The grid, the walls, the mouse, the cheese, the mouse traps, the crumbs and the cats, all drawn in
-## code.
+## The grid, the walls, doors and gates, the floor tiles, the mouse, the cheese, the mouse traps, the
+## crumbs, keys and crates, and the cats, all drawn in code.
 
 ## The mouse picked up the crumb on this cell.
 signal crumb_collected(cell: Vector2i)
 ## The mouse opened the chest on this cell.
 signal chest_opened(cell: Vector2i)
+## The mouse picked up the key on this cell.
+signal key_collected(cell: Vector2i)
+## The mouse used a key on the locked door on this edge (a key into doors).
+signal door_unlocked(edge: Vector3i)
 ## A cell was left-clicked, side being the edge of the cell nearest the click. The F2 dev menu uses
 ## it to edit the board.
 signal cell_clicked(cell: Vector2i, side: Card.Dir)
@@ -44,6 +48,19 @@ const HOLE_PAIRS: Array[Color] = [Color("4fc3b0"), Color("c792ff"), Color("ff8fa
 const PLANK := Color("c69a63")
 const PLANK_DARK := Color("8f6638")
 const GAP := Color("2a211a")
+const DOOR := Color("a0522d")
+const DOOR_EDGE := Color("5c2e14")
+const DOOR_WIDTH := 7.0
+const KEY := Color("f2c94c")
+const KEY_EDGE := Color("8a6a12")
+const CRATE := Color("c08a52")
+const CRATE_EDGE := Color("6b4423")
+const PAD := Color("f08c2e")
+const PAD_EDGE := Color("9c4f0f")
+## Colors of the switches, by index into plates: each plate and the gates it opens.
+const SWITCH_COLORS: Array[Color] = [Color("d9483b"), Color("3a74d0"), Color("2e9457")]
+## How faded an open gate is drawn.
+const OPEN_GATE_ALPHA := 0.35
 ## Walls are drawn faded while the mouse is squeezing through them.
 const SQUEEZE_ALPHA := 0.35
 const CHEESE := Color("f5c542")
@@ -134,6 +151,24 @@ var holes: Array[Vector2i] = []
 var floorboards: Array[Vector2i] = []
 ## Gaps where floorboards broke. Nothing can move onto one, though jumps can pass over it.
 var broken: Array[Vector2i] = []
+## Jump pads and the hop each one gives: a move that ends on one jumps the mouse by that offset, a
+## straight line of 2 or more cells, over whatever is in between (see jump_landing).
+var pads: Dictionary[Vector2i, Vector2i] = {}
+## Locked doors on cell edges, keyed like walls. A door is a wall until the mouse walks or slides into
+## it holding a key, which uses up the key and opens the door for the rest of the round.
+var doors: Dictionary[Vector3i, bool] = {}
+## Cells with a key. Walking or sliding over one picks it up, like a crumb.
+var keys: Array[Vector2i] = []
+## Keys the mouse is carrying this round.
+var keys_held := 0
+## Pressure plates. plates[i] opens the gates whose value in gates is i.
+var plates: Array[Vector2i] = []
+## Gates on cell edges, keyed like walls, and the plate in plates that opens each one. A gate is a wall
+## except while a crate or the mouse is on its plate (see is_pressed).
+var gates: Dictionary[Vector3i, int] = {}
+## Crates. The mouse pushes one a cell by walking into it, onto plain floor or a plate (see
+## _crate_can_enter). Slides stop short of a crate and jumps don't land on one.
+var crates: Array[Vector2i] = []
 ## True once the mouse is stuck in glue this turn. Main clears it at the start of each turn.
 var stuck := false
 ## Cells with a crumb for the shop. Walking or sliding over one picks it up; jumping over one doesn't.
@@ -155,6 +190,12 @@ var hop := 0.0:
 		queue_redraw()
 ## True while the cats walk, so their old paths aren't drawn.
 var _cats_walking := false
+## The crate in crates being pushed, and how far it's drawn from its cell while it slides there.
+var _pushed := -1
+var _push_shift := Vector2.ZERO:
+	set(value):
+		_push_shift = value
+		queue_redraw()
 ## The previewed way the mouse goes this turn, as a trail, and how it ends (see show_preview).
 var _preview: Array[Vector2i] = []
 var _preview_end := PreviewEnd.MOVED
@@ -168,7 +209,8 @@ func _ready() -> void:
 
 
 ## With king set, the first cat is the Alley King, a bigger cat that hunts the mouse. The glue,
-## conveyors, holes and floorboards are set before this (Main._place_floor) and left as they are.
+## conveyors, holes, floorboards, jump pads, doors, keys and switches are set before this
+## (Main._place_floor, Main._place_locks) and left as they are.
 func place(mouse: Vector2i, cheese: Vector2i, trap_cells: Array[Vector2i] = [],
 		crumb_cells: Array[Vector2i] = [], cat_cells: Array[Vector2i] = [], king := false,
 		wall_set: Dictionary[Vector3i, bool] = {}) -> void:
@@ -179,6 +221,8 @@ func place(mouse: Vector2i, cheese: Vector2i, trap_cells: Array[Vector2i] = [],
 	walls = wall_set
 	squeeze = false
 	stuck = false
+	keys_held = 0
+	_pushed = -1
 	crumbs = crumb_cells
 	cats.clear()
 	for cell in cat_cells:
@@ -204,6 +248,13 @@ func copy_from(other: Board) -> void:
 	holes = other.holes.duplicate()
 	floorboards = other.floorboards.duplicate()
 	broken = other.broken.duplicate()
+	pads = other.pads.duplicate()
+	doors = other.doors.duplicate()
+	keys = other.keys.duplicate()
+	keys_held = other.keys_held
+	plates = other.plates.duplicate()
+	gates = other.gates.duplicate()
+	crates = other.crates.duplicate()
 	stuck = other.stuck
 	crumbs = other.crumbs.duplicate()
 	chests = other.chests.duplicate()
@@ -245,19 +296,61 @@ func remove_trap(cell: Vector2i) -> void:
 	queue_redraw()
 
 
-## True when the cell has a glue pad, a conveyor, a mouse hole, a floorboard or a gap.
+## True when the cell has a glue pad, a conveyor, a mouse hole, a floorboard, a gap or a jump pad.
 func has_tile(cell: Vector2i) -> bool:
-	return cell in glue or conveyors.has(cell) or cell in holes or cell in floorboards or cell in broken
+	return cell in glue or conveyors.has(cell) or cell in holes or cell in floorboards or cell in broken \
+		or pads.has(cell)
 
 
-## Takes any glue pad, conveyor, mouse hole, floorboard or gap off the cell. Used by the dev menu.
+## Takes the floor tiles, doors, gates, keys, plates and crates off the board, for laying out a new
+## round.
+func clear_layout() -> void:
+	glue = []
+	conveyors = {}
+	holes = []
+	floorboards = []
+	broken = []
+	pads = {}
+	doors = {}
+	keys = []
+	plates = []
+	gates = {}
+	crates = []
+	keys_held = 0
+
+
+## True when the cell has a key, a pressure plate or a crate.
+func has_item(cell: Vector2i) -> bool:
+	return cell in keys or cell in plates or cell in crates
+
+
+## Takes any glue pad, conveyor, mouse hole, floorboard, gap or jump pad off the cell. Used by the dev
+## menu.
 func clear_tile(cell: Vector2i) -> void:
 	glue.erase(cell)
 	conveyors.erase(cell)
 	holes.erase(cell)
 	floorboards.erase(cell)
 	broken.erase(cell)
+	pads.erase(cell)
 	plan_cats()
+
+
+## Takes the plate at index off the board, with the gates it opens. Later plates move down one, gates
+## and all. Used by the dev menu.
+func remove_plate(index: int) -> void:
+	plates.remove_at(index)
+	for edge: Vector3i in gates.keys():
+		if gates[edge] == index:
+			gates.erase(edge)
+		elif gates[edge] > index:
+			gates[edge] -= 1
+	plan_cats()
+
+
+## True when a crate or the mouse is on the plate at index in plates, which holds its gates open.
+func is_pressed(plate: int) -> bool:
+	return plate < plates.size() and (plates[plate] in crates or plates[plate] == mouse_cell)
 
 
 ## The wall on the edge between two neighboring cells, as a key into walls.
@@ -270,22 +363,28 @@ func has_wall(a: Vector2i, b: Vector2i) -> bool:
 	return walls.has(wall_between(a, b))
 
 
-## Adds the wall between the neighboring cells, or removes the one there. Returns whether there's a
-## wall there now.
-func toggle_wall(a: Vector2i, b: Vector2i) -> bool:
-	var wall := wall_between(a, b)
-	var added := not walls.erase(wall)
-	if added:
-		walls[wall] = true
+## True when a wall, a locked door or a closed gate stands between the two neighboring cells.
+func is_barrier(a: Vector2i, b: Vector2i) -> bool:
+	var edge := wall_between(a, b)
+	return walls.has(edge) or doors.has(edge) or gates.has(edge) and not is_pressed(gates[edge])
+
+
+## Takes any wall, locked door or gate off the edge between the neighboring cells. Used by the dev menu.
+func clear_edge(a: Vector2i, b: Vector2i) -> void:
+	var edge := wall_between(a, b)
+	walls.erase(edge)
+	doors.erase(edge)
+	gates.erase(edge)
 	plan_cats()
-	return added
 
 
-## Where the mouse lands stepping from cell in dir: the next cell, or cell itself when the edge or a
-## wall is in the way.
+## Where the mouse lands stepping from cell in dir: the next cell, or cell itself when the edge, a wall
+## or a crate that can't be pushed is in the way. A locked door is no bar with a key in hand.
 func step_target(cell: Vector2i, dir: Card.Dir) -> Vector2i:
 	var next: Vector2i = cell + Card.OFFSETS[dir]
-	return next if _mouse_can_step(cell, next) else cell
+	if next in crates:
+		return next if _mouse_can_reach(cell, next) and _crate_can_enter(next, next + Card.OFFSETS[dir]) else cell
+	return next if _mouse_can_step(cell, next, true) else cell
 
 
 ## Steps from start to each cell it can reach, going around walls (or through them, with
@@ -333,7 +432,7 @@ func move_cats() -> void:
 
 
 ## Runs the cheese up to steps cells, each one farther from the mouse, never onto a trap, a crumb, a
-## chest, a cat or a cat's path. A cornered cheese stays put.
+## chest, a key, a crate, a cat or a cat's path. A cornered cheese stays put.
 func move_cheese(steps: int) -> void:
 	var start := cheese_cell
 	for i in steps:
@@ -341,7 +440,7 @@ func move_cheese(steps: int) -> void:
 		for dir: Card.Dir in Card.Dir.values():
 			var next: Vector2i = cheese_cell + Card.OFFSETS[dir]
 			if not _can_step(cheese_cell, next) or next == mouse_cell or next in crumbs or next in chests \
-					or is_deadly(next):
+					or next in keys or next in crates or is_deadly(next):
 				continue
 			if _distance(next, mouse_cell) > _distance(best, mouse_cell):
 				best = next
@@ -360,7 +459,8 @@ func move_cheese(steps: int) -> void:
 
 
 ## Moves the mouse one cell (bumping off walls and the edge, or coming in on the opposite side of an
-## edge if wrap is set). Returns true if the move ends the round (see _finish).
+## edge if wrap is set), pushing a crate there on a cell and opening a locked door with a key. Returns
+## true if the move ends the round (see _finish).
 func step(dir: Card.Dir, wrap := false) -> bool:
 	facing = dir
 	var start := mouse_cell
@@ -368,10 +468,19 @@ func step(dir: Card.Dir, wrap := false) -> bool:
 	var target := mouse_cell + offset
 	var wrapped := Vector2i(posmod(target.x, grid), posmod(target.y, grid))
 	var tween := create_tween().set_trans(Tween.TRANS_SINE)
-	if _mouse_can_step(mouse_cell, target):
+	var crate := crates.find(target)
+	if crate != -1 and _mouse_can_reach(mouse_cell, target) and _crate_can_enter(target, target + offset):
+		crates[crate] = target + offset
+		_pushed = crate
+		_push_shift = -Vector2(offset)
+		BugReport.note("  Pushed the crate at %s to %s" % [target, crates[crate]])
+	if _mouse_can_step(mouse_cell, target, true):
+		_unlock(mouse_cell, target)
 		mouse_cell = target
 		tween.tween_property(self, "mouse_pos", Vector2(target), STEP_TIME)
-	elif wrap and not _in_bounds(target) and wrapped not in broken:
+		if _pushed != -1:
+			tween.parallel().tween_property(self, "_push_shift", Vector2.ZERO, STEP_TIME)
+	elif wrap and not _in_bounds(target) and wrapped not in broken and wrapped not in crates:
 		target = wrapped
 		_trail_break()
 		mouse_cell = target
@@ -385,17 +494,19 @@ func step(dir: Card.Dir, wrap := false) -> bool:
 	return await _finish(tween, start)
 
 
-## Moves the mouse in a straight line until it hits a wall, a gap, a trap, a cat's path, glue or the
-## cheese.
+## Moves the mouse in a straight line until it hits a wall, a gap, a crate, a trap, a cat's path, glue
+## or the cheese. With a key in hand it opens a locked door on the way. Sliding into a crate right next
+## to the mouse pushes it a cell, like a step.
 func slide(dir: Card.Dir) -> bool:
 	var offset: Vector2i = Card.OFFSETS[dir]
-	if not _mouse_can_step(mouse_cell, mouse_cell + offset):
+	if not _mouse_can_step(mouse_cell, mouse_cell + offset, true):
 		return await step(dir)
 	facing = dir
 	var start := mouse_cell
 	var passed: Array[Vector2i] = []
-	while _mouse_can_step(mouse_cell, mouse_cell + offset) and mouse_cell != cheese_cell and not is_caught() \
+	while _mouse_can_step(mouse_cell, mouse_cell + offset, true) and mouse_cell != cheese_cell and not is_caught() \
 			and (passed.is_empty() or mouse_cell not in glue):
+		_unlock(mouse_cell, mouse_cell + offset)
 		mouse_cell += offset
 		passed.append(mouse_cell)
 	var tween := create_tween().set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
@@ -404,39 +515,45 @@ func slide(dir: Card.Dir) -> bool:
 
 
 ## Hops the mouse by offset, passing over the cells in between. Lands as far as the edge and the walls
-## allow (see _jump_landing).
+## allow (see jump_landing).
 func jump(offset: Vector2i, dir: Card.Dir) -> bool:
 	facing = dir
 	var start := mouse_cell
-	mouse_cell = _jump_landing(offset)
+	mouse_cell = jump_landing(mouse_cell, offset)
+	return await _finish(_hop_tween(), start)
+
+
+## Tweens the mouse to its cell in a hop.
+func _hop_tween() -> Tween:
 	var tween := create_tween().set_parallel()
 	tween.tween_property(self, "mouse_pos", Vector2(mouse_cell), JUMP_TIME)
 	tween.tween_method(func(t: float) -> void: hop = sin(t * PI) * HOP_HEIGHT, 0.0, 1.0, JUMP_TIME)
-	return await _finish(tween, start)
+	return tween
 
 
-## Where a jump by offset lands. A straight jump stops at the first wall, and short of a gap it would
-## land in, though it can pass over one. A diagonal one (a cell each way) gets around the corner if
-## either way around it is clear of walls, and otherwise goes as far as it can along one axis.
-func _jump_landing(offset: Vector2i) -> Vector2i:
-	var target := (mouse_cell + offset).clamp(Vector2i.ZERO, Vector2i(grid - 1, grid - 1))
-	var x_step := Vector2i(signi(target.x - mouse_cell.x), 0)
-	var y_step := Vector2i(0, signi(target.y - mouse_cell.y))
+## Where a jump by offset from a cell lands. A straight jump stops at the first wall, locked door or
+## closed gate, and short of a gap or a crate it would land on, though it can pass over them. A diagonal
+## one (a cell each way) gets around the corner if either way around it is clear of walls, and
+## otherwise goes as far as it can along one axis.
+func jump_landing(from: Vector2i, offset: Vector2i) -> Vector2i:
+	var target := (from + offset).clamp(Vector2i.ZERO, Vector2i(grid - 1, grid - 1))
+	var x_step := Vector2i(signi(target.x - from.x), 0)
+	var y_step := Vector2i(0, signi(target.y - from.y))
 	if x_step != Vector2i.ZERO and y_step != Vector2i.ZERO:
-		if target not in broken:
+		if target not in broken and target not in crates:
 			for first: Vector2i in [x_step, y_step]:
-				var corner := mouse_cell + first
-				if _can_cross(mouse_cell, corner, squeeze) and _can_cross(corner, target, squeeze):
+				var corner := from + first
+				if _can_cross(from, corner, squeeze) and _can_cross(corner, target, squeeze):
 					return target
 		for first: Vector2i in [x_step, y_step]:
-			if _mouse_can_step(mouse_cell, mouse_cell + first):
-				return mouse_cell + first
-		return mouse_cell
+			if _mouse_can_step(from, from + first):
+				return from + first
+		return from
 	var step := x_step + y_step
-	var at := mouse_cell
+	var at := from
 	while at != target and _can_cross(at, at + step, squeeze):
 		at += step
-	while at != mouse_cell and at in broken:
+	while at != from and (at in broken or at in crates):
 		at -= step
 	return at
 
@@ -486,12 +603,19 @@ func _settle(tween: Tween) -> void:
 		tween.kill()
 		mouse_pos = Vector2(mouse_cell)
 		hop = 0.0
+		_push_shift = Vector2.ZERO
+	_pushed = -1
 
 
-## Picks up any crumbs and chests on the cells (and, with the magnet, crumbs next to the mouse), and
-## lets a cat on the mouse's cell pounce. Returns true if the round is over.
+## Picks up any crumbs, keys and chests on the cells (and, with the magnet, crumbs next to the mouse),
+## and lets a cat on the mouse's cell pounce. Returns true if the round is over.
 func _arrive(cells: Array[Vector2i]) -> bool:
 	for cell in cells:
+		if cell in keys:
+			keys.erase(cell)
+			keys_held += 1
+			queue_redraw()
+			key_collected.emit(cell)
 		if cell in crumbs:
 			crumbs.erase(cell)
 			queue_redraw()
@@ -515,8 +639,8 @@ func _arrive(cells: Array[Vector2i]) -> bool:
 
 
 ## Carries the mouse on from where a move ended: out of the linked hole when it's on a mouse hole,
-## a cell along the belt when it's on a conveyor, until it rests on another cell. Then glue there
-## sticks it for the rest of the turn. Returns true if the round is over.
+## a cell along the belt when it's on a conveyor, a hop away when it's on a jump pad, until it rests on
+## another cell. Then glue there sticks it for the rest of the turn. Returns true if the round is over.
 func _ride() -> bool:
 	var popped_out := false
 	# A loop of conveyors would carry the mouse round forever.
@@ -536,6 +660,13 @@ func _ride() -> bool:
 			popped_out = false
 			tween = create_tween()
 			tween.tween_property(self, "mouse_pos", Vector2(mouse_cell), CONVEYOR_TIME)
+		elif pads.has(mouse_cell) and jump_landing(mouse_cell, pads[mouse_cell]) != mouse_cell:
+			var pad := mouse_cell
+			facing = Card.OFFSETS.find_key(pads[pad].sign()) as Card.Dir
+			mouse_cell = jump_landing(pad, pads[pad])
+			BugReport.note("  Jump pad at %s threw the mouse to %s" % [pad, mouse_cell])
+			popped_out = false
+			tween = _hop_tween()
 		else:
 			break
 		await _settle(tween)
@@ -579,14 +710,16 @@ func _pounce(cat: Cat) -> void:
 		cat.pos = Vector2(mouse_cell)
 
 
-## Gives each cat a new path, on the board, off the traps, cheese, mouse and other cats and not
-## through walls. Hunters head for the mouse, around the walls and traps.
+## Gives each cat a new path, on the board, off the traps, crates, cheese, mouse and other cats and not
+## through walls, doors or gates (even open ones, which can shut before the cat walks). Hunters head
+## for the mouse, around the walls and traps.
 func plan_cats() -> void:
 	var to_mouse := distances_from(mouse_cell)
 	var distance := func(cell: Vector2i) -> int: return to_mouse.get(cell, grid * grid)
 	for cat in cats:
 		cat.plan(func(from: Vector2i, cell: Vector2i) -> bool:
-			return not _can_step(from, cell) or cell in traps or cell == cheese_cell or cell == mouse_cell \
+			return not _can_step(from, cell) or gates.has(wall_between(from, cell)) or cell in traps \
+				or cell in crates or cell == cheese_cell or cell == mouse_cell \
 				or cats.any(func(other: Cat) -> bool: return other != cat and other.cell == cell), distance)
 	queue_redraw()
 
@@ -618,18 +751,47 @@ func _in_bounds(cell: Vector2i) -> bool:
 
 
 ## True when something can move from a cell onto its neighbor: it's on the board, not a gap, and no
-## wall is in the way unless through_walls.
+## wall, locked door or closed gate is in the way unless through_walls.
 func _can_step(from: Vector2i, to: Vector2i, through_walls := false) -> bool:
 	return _can_cross(from, to, through_walls) and to not in broken
 
 
 ## Like _can_step, but a gap is fine: for jumps passing over the cell.
 func _can_cross(from: Vector2i, to: Vector2i, through_walls := false) -> bool:
-	return _in_bounds(to) and (through_walls or not has_wall(from, to))
+	return _in_bounds(to) and (through_walls or not is_barrier(from, to))
 
 
-func _mouse_can_step(from: Vector2i, to: Vector2i) -> bool:
-	return _can_step(from, to, squeeze)
+## True when the mouse can move from a cell onto its neighbor: not onto a crate, and through walls only
+## while squeezing. With keyed, a locked door is no bar while the mouse holds a key (see _unlock).
+func _mouse_can_step(from: Vector2i, to: Vector2i, keyed := false) -> bool:
+	return to not in crates and _mouse_can_reach(from, to, keyed)
+
+
+## Like _mouse_can_step, keyed, but a crate on the cell is fine: for pushing it.
+func _mouse_can_reach(from: Vector2i, to: Vector2i, keyed := true) -> bool:
+	return _can_step(from, to, squeeze) or keyed and keys_held > 0 and to not in broken and _in_bounds(to) \
+		and doors.has(wall_between(from, to))
+
+
+## True when a crate can be pushed from a cell onto its neighbor: plain floor or a plate, with no wall,
+## door or closed gate in the way, and no trap, crumb, chest, key, other crate, cheese, floor tile or
+## cat (or cat's path) on it.
+func _crate_can_enter(from: Vector2i, to: Vector2i) -> bool:
+	return _can_step(from, to) and not has_tile(to) and to not in traps and to not in crumbs \
+		and to not in chests and to not in keys and to not in crates and to != cheese_cell and _cat_at(to) == null
+
+
+## Uses up one of the mouse's keys on the locked door between the cells, if there is one, opening it
+## for the rest of the round. A squeezing mouse goes through without one.
+func _unlock(from: Vector2i, to: Vector2i) -> void:
+	var edge := wall_between(from, to)
+	if squeeze or not doors.has(edge):
+		return
+	doors.erase(edge)
+	keys_held -= 1
+	BugReport.note("  Unlocked the door between %s and %s (%d keys left)" % [from, to, keys_held])
+	queue_redraw()
+	door_unlocked.emit(edge)
 
 
 func _distance(a: Vector2i, b: Vector2i) -> int:
@@ -648,15 +810,20 @@ func _draw() -> void:
 		for cat in cats:
 			_draw_cat_path(cat)
 	_draw_walls()
+	_draw_locks()
 	_draw_cheese(_cell_center(cheese_pos))
 	for crumb in crumbs:
 		_draw_crumb(_cell_center(Vector2(crumb)))
+	for key in keys:
+		_draw_key(_cell_center(Vector2(key)))
 	for chest in chests:
 		_draw_chest(_cell_center(Vector2(chest)))
 	# Once the mouse has landed on a trap, that trap has snapped shut.
 	var snapped := is_trapped() and mouse_pos == Vector2(mouse_cell)
 	for trap in traps:
 		_draw_trap(_cell_center(Vector2(trap)), snapped and trap == mouse_cell)
+	for i in crates.size():
+		_draw_crate(_cell_center(Vector2(crates[i]) + (_push_shift if i == _pushed else Vector2.ZERO)))
 	_draw_preview_trail()
 	var center := _cell_center(mouse_pos)
 	if hop > 0.0:
@@ -675,8 +842,34 @@ func _cell_center(cell: Vector2) -> Vector2:
 
 
 ## Draws the cells that change how the mouse moves: floorboards and the gaps they leave, conveyors,
-## mouse holes and glue.
+## mouse holes, glue, jump pads and pressure plates.
 func _draw_floor() -> void:
+	for i in plates.size():
+		# A little bigger than a crate, so a pressed plate shows round the crate on it.
+		var plate := Rect2(Vector2(plates[i]) * CELL, Vector2(CELL, CELL)).grow(-3)
+		var color := SWITCH_COLORS[i % SWITCH_COLORS.size()]
+		# A raised plate, or pushed flat and darker while something is on it.
+		if is_pressed(i):
+			draw_rect(plate, color.darkened(0.35))
+		else:
+			draw_rect(Rect2(plate.position + Vector2(1.5, 2), plate.size), SHADOW)
+			draw_rect(plate, color.lightened(0.35))
+			draw_rect(plate.grow(-4), color.lightened(0.15))
+		draw_rect(plate, color.darkened(0.4), false, 1.5)
+	for cell: Vector2i in pads:
+		# A round pad with an arrowhead on its rim pointing the way it throws, and the cells it throws in
+		# the middle.
+		var center := _cell_center(Vector2(cell))
+		var offset: Vector2i = pads[cell]
+		draw_set_transform_matrix(_view * Transform2D(Card.ANGLES[Card.OFFSETS.find_key(offset.sign())], center))
+		draw_colored_polygon(PackedVector2Array([Vector2(-7, -8), Vector2(0, -14.5), Vector2(7, -8)]), PAD_EDGE)
+		draw_set_transform_matrix(_view)
+		draw_circle(center, 10.5, PAD_EDGE)
+		draw_circle(center, 9.0, PAD)
+		var font := ThemeDB.fallback_font
+		var text := str(absi(offset.x + offset.y))
+		var at := center + Vector2(-font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, 14).x / 2.0, 5)
+		draw_string(font, at, text, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color.WHITE)
 	for cell in floorboards:
 		var plank := Rect2(Vector2(cell) * CELL, Vector2(CELL, CELL)).grow(-2)
 		draw_rect(plank, PLANK)
@@ -777,11 +970,49 @@ func _draw_walls() -> void:
 		var shift: Vector2 = layer[0]
 		var color: Color = layer[1]
 		for wall: Vector3i in walls:
-			var end := Vector2(wall.x + 1, wall.y + 1) * CELL
-			var start := Vector2(end.x, wall.y * CELL) if wall.z == 0 else Vector2(wall.x * CELL, end.y)
-			draw_line(start + shift, end + shift, color, WALL_WIDTH)
-			draw_circle(start + shift, WALL_WIDTH / 2.0, color)
-			draw_circle(end + shift, WALL_WIDTH / 2.0, color)
+			var ends := _edge_ends(wall)
+			draw_line(ends[0] + shift, ends[1] + shift, color, WALL_WIDTH)
+			draw_circle(ends[0] + shift, WALL_WIDTH / 2.0, color)
+			draw_circle(ends[1] + shift, WALL_WIDTH / 2.0, color)
+
+
+## The two ends of a cell edge (a key into walls, doors or gates), in board pixels.
+func _edge_ends(edge: Vector3i) -> PackedVector2Array:
+	var end := Vector2(edge.x + 1, edge.y + 1) * CELL
+	var start := Vector2(end.x, edge.y * CELL) if edge.z == 0 else Vector2(edge.x * CELL, end.y)
+	return PackedVector2Array([start, end])
+
+
+## Draws the locked doors, as a wooden plank along the edge with a gold keyhole, and the gates, as bars
+## in their plate's color: solid while shut, faded while open. Faded too while the mouse is squeezing.
+func _draw_locks() -> void:
+	var alpha := SQUEEZE_ALPHA if squeeze else 1.0
+	for door: Vector3i in doors:
+		var ends := _edge_ends(door)
+		draw_line(ends[0] + Vector2(1.5, 2), ends[1] + Vector2(1.5, 2), Color(SHADOW, SHADOW.a * alpha), DOOR_WIDTH)
+		draw_line(ends[0], ends[1], Color(DOOR_EDGE, alpha), DOOR_WIDTH + 2.0)
+		draw_line(ends[0], ends[1], Color(DOOR, alpha), DOOR_WIDTH)
+		var middle := (ends[0] + ends[1]) / 2.0
+		draw_circle(middle, 4.0, Color(KEY, alpha))
+		draw_circle(middle, 4.0, Color(KEY_EDGE, alpha), false, 1.0, true)
+		draw_circle(middle + Vector2(0, -0.8), 1.2, Color(DOOR_EDGE, alpha))
+		draw_line(middle + Vector2(0, -0.5), middle + Vector2(0, 2), Color(DOOR_EDGE, alpha), 1.0)
+	for gate: Vector3i in gates:
+		var ends := _edge_ends(gate)
+		var color := SWITCH_COLORS[gates[gate] % SWITCH_COLORS.size()]
+		var open := is_pressed(gates[gate])
+		color.a = (OPEN_GATE_ALPHA if open else 1.0) * alpha
+		var along := (ends[1] - ends[0]) / 4.0
+		var across := Vector2(along.y, -along.x).normalized() * 3.5
+		if not open:
+			draw_line(ends[0], ends[1], Color(SHADOW, SHADOW.a * alpha), WALL_WIDTH + 2.0)
+		draw_line(ends[0], ends[1], color, 3.0)
+		# Bars across the gate, and a post at each end.
+		for i in range(1, 4):
+			var at := ends[0] + along * i
+			draw_line(at - across, at + across, color, 2.0)
+		for end in ends:
+			draw_circle(end, 3.0, color)
 
 
 func _draw_cheese(center: Vector2) -> void:
@@ -801,6 +1032,30 @@ func _draw_crumb(center: Vector2) -> void:
 	for bit: Array in [[Vector2(-4, 2), 3.2], [Vector2(3, -2), 2.6], [Vector2(2, 5), 2.0]]:
 		draw_circle(center + bit[0], bit[1], CHEESE)
 		draw_circle(center + bit[0], bit[1], CHEESE_HOLE, false, 1.0, true)
+
+
+## Draws a gold key: a ring, a shaft and two teeth, tilted up to the right.
+func _draw_key(center: Vector2) -> void:
+	draw_set_transform_matrix(_view * Transform2D(-PI / 4, center))
+	for layer: Array in [[KEY_EDGE, 2.0], [KEY, 0.0]]:
+		var color: Color = layer[0]
+		var grow: float = layer[1]
+		draw_line(Vector2(-3, 0), Vector2(10, 0), color, 2.5 + grow)
+		draw_line(Vector2(6, 0), Vector2(6, 4), color, 2.0 + grow)
+		draw_line(Vector2(9, 0), Vector2(9, 3.5), color, 2.0 + grow)
+		draw_circle(Vector2(-6, 0), 4.5 + grow / 2.0, color)
+	draw_circle(Vector2(-6, 0), 1.8, KEY_EDGE)
+	draw_set_transform_matrix(_view)
+
+
+## Draws a wooden crate from above: a box of planks with a frame and a cross brace.
+func _draw_crate(center: Vector2) -> void:
+	var box := Rect2(center - Vector2(9.5, 9.5), Vector2(19, 19))
+	draw_rect(Rect2(box.position + Vector2(1.5, 2), box.size), SHADOW)
+	draw_rect(box, CRATE)
+	draw_rect(box.grow(-3), CRATE_EDGE, false, 1.0)
+	draw_line(box.position + Vector2(3, 3), box.end - Vector2(3, 3), CRATE_EDGE, 2.0)
+	draw_rect(box, CRATE_EDGE, false, 2.0)
 
 
 ## Draws a small treasure chest from the front: a wooden box with a rounded lid, iron bands and a

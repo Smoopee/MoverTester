@@ -2,7 +2,8 @@ class_name Difficulty
 extends RefCounted
 ## How hard each round of a run is. The first EASY_ROUNDS rounds are a small board with no
 ## obstacles; after that the board grows and gets more traps and walls each round, and the other
-## obstacles join one at a time: cats, glue, mouse holes, conveyors, then creaky floorboards. Every
+## obstacles join one at a time: cats, glue, jump pads, mouse holes, conveyors, locked doors, creaky
+## floorboards, then switches. Every
 ## round has a turn limit, and running out of turns ends the run like being caught.
 
 ## Rounds at the start of a run with no traps or cats.
@@ -40,6 +41,21 @@ const FIRST_FLOORBOARD_ROUND := 10
 const START_FLOORBOARDS := 2
 const ROUNDS_PER_FLOORBOARD := 2
 const MAX_FLOORBOARDS := 8
+## Jump pads, the same way.
+const FIRST_PAD_ROUND := 6
+const START_PADS := 2
+const ROUNDS_PER_PAD := 3
+const MAX_PADS := 6
+## Locked doors, each with a key (see Main._place_locks), the same way.
+const FIRST_DOOR_ROUND := 9
+const START_DOORS := 1
+const ROUNDS_PER_DOOR := 4
+const MAX_DOORS := 3
+## Switches (a pressure plate, its gate and a crate), the same way. At most Board.SWITCH_COLORS.
+const FIRST_SWITCH_ROUND := 11
+const START_SWITCHES := 1
+const ROUNDS_PER_SWITCH := 5
+const MAX_SWITCHES := 3
 ## The turn limit gives a turn for every CELLS_PER_TURN cells from the mouse to the cheese, plus spare
 ## turns: START_SPARE_TURNS, one fewer every ROUNDS_PER_SPARE_TURN rounds, down to MIN_SPARE_TURNS.
 const CELLS_PER_TURN := 2.5
@@ -86,6 +102,20 @@ static func floorboards(round_number: int) -> int:
 		MAX_FLOORBOARDS)
 
 
+static func pads(round_number: int) -> int:
+	return _ramp(round_number, FIRST_PAD_ROUND, START_PADS, ROUNDS_PER_PAD, MAX_PADS)
+
+
+## Locked doors, each with its key.
+static func doors(round_number: int) -> int:
+	return _ramp(round_number, FIRST_DOOR_ROUND, START_DOORS, ROUNDS_PER_DOOR, MAX_DOORS)
+
+
+## Switches: a pressure plate, its gate and a crate each.
+static func switches(round_number: int) -> int:
+	return _ramp(round_number, FIRST_SWITCH_ROUND, START_SWITCHES, ROUNDS_PER_SWITCH, MAX_SWITCHES)
+
+
 ## Turns to reach cheese that starts distance steps from the mouse, around the walls and traps.
 static func turn_limit(round_number: int, distance: int) -> int:
 	var spare := maxi(START_SPARE_TURNS - floori((round_number - 1) / float(ROUNDS_PER_SPARE_TURN)),
@@ -97,14 +127,15 @@ static func turn_limit(round_number: int, distance: int) -> int:
 static func describe(round_number: int) -> String:
 	var size := grid(round_number)
 	var parts := PackedStringArray(["%dx%d board" % [size, size]])
-	for part: Array in [[traps(round_number), "trap"], [walls(round_number), "wall"],
-			[cats(round_number), "cat"], [glue(round_number), "glue"],
-			[holes(round_number), "hole pair"], [belts(round_number), "conveyor"],
-			[floorboards(round_number), "floorboard"]]:
+	for part: Array in [[traps(round_number), "trap", "traps"], [walls(round_number), "wall", "walls"],
+			[cats(round_number), "cat", "cats"], [glue(round_number), "glue", "glue"],
+			[pads(round_number), "jump pad", "jump pads"], [holes(round_number), "hole pair", "hole pairs"],
+			[belts(round_number), "conveyor", "conveyors"], [doors(round_number), "locked door", "locked doors"],
+			[floorboards(round_number), "floorboard", "floorboards"],
+			[switches(round_number), "switch", "switches"]]:
 		var count: int = part[0]
 		if count > 0:
-			var noun: String = part[1]
-			parts.append("%d %s%s" % [count, noun, "" if count == 1 or noun == "glue" else "s"])
+			parts.append("%d %s" % [count, part[1] if count == 1 else part[2]])
 	return ", ".join(parts)
 
 
