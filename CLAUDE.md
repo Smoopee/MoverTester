@@ -83,9 +83,14 @@ the start of a turn and shrinks the cards so the slots and the hand each fit the
 Rounds chain into an endless **run**: the deck, crumbs, trinkets, pouch, slots and hand size carry over until a trap
 or a cat catches the mouse (or a pylon or flamethrower), or the turns run out (`main.gd` `lost()`), which starts a new run. A won round pays crumbs (`WIN_CRUMBS` + unused discards, plus
 crumbs picked up on the board), then opens the **shop**. It sells trinkets (passive for the run),
-consumables (held in the pouch, used once) and card stamps (a slot effect stuck on one card). A
+skills, consumables (held in the pouch, used once) and card stamps (a slot effect stuck on one card). A
 stamped card plays its slot's effect first, then its stamp (`main.gd` `_play`): a BURN slot with a
 SLIDE stamp moves 3 cells, then slides. A burned card stays burned whatever its stamp.
+
+**Skills** (`Items.Skill`, `Run.skills`) are always-on abilities for the rest of the run, held in
+`Items.SKILL_SLOTS` (4) slots shown above the card slots (`main.gd` `_refresh_skills`). WARP makes
+every step wrap round the board's edges like a WRAP slot (`Board.warp`); EFFICIENT gives +1 discard
+for each crumb picked up (`_on_crumb_collected`).
 
 Every `Boss.EVERY` (3) rounds is a **boss round** with an extra rule: THE ALLEY KING (a big cat that
 hunts the mouse, on top of the usual cats), RUNAWAY CHEESE (the cheese runs from the mouse; a few
@@ -129,13 +134,17 @@ pays `Boss.WIN_CRUMBS` and offers a free trinket.
   its `data`.
 - `scripts/card_data.gd` — `CardData`: a deck card's direction and stamp. Piles hold these.
 - `scripts/deck.gd` — `Deck`: the run's `cards`, and the round's draw and discard piles built from them.
-- `scripts/run.gd` — `Run`: state that lasts a run (deck, slots, hand size, round number, crumbs, trinkets, pouch,
-  this and the next boss, bosses beaten).
-- `scripts/items.gd` — `Items`: shop content, meaning the `Trinket` and `Consumable` enums with
-  name / description / price tables, and the `STAMPS` the shop offers.
-- `scripts/item_icon.gd` — `ItemIcon`: a `Texture2D` that draws a trinket's, consumable's or stamp's
-  symbol in code (`ItemIcon.trinket(id)`, ...), so it works as a `Button.icon` or in a `TextureRect`.
-  A new trinket or consumable needs a symbol in `_draw_trinket` / `_draw_consumable`.
+- `scripts/run.gd` — `Run`: state that lasts a run (deck, slots, hand size, round number, crumbs, trinkets,
+  skills, pouch, this and the next boss, bosses beaten).
+- `scripts/items.gd` — `Items`: shop content, meaning the `Trinket`, `Skill` and `Consumable` enums
+  with name / description / price tables, and the `STAMPS` the shop offers.
+- `scripts/item_icon.gd` — `ItemIcon`: a `Texture2D` that draws a trinket's, skill's, consumable's or
+  stamp's symbol in code (`ItemIcon.trinket(id)`, ...), so it works as a `Button.icon` or in a
+  `TextureRect`. A new trinket, skill or consumable needs a symbol in `_draw_trinket` / `_draw_skill`
+  / `_draw_consumable`.
+- `scripts/skill_slot.gd` — `SkillSlot`: one of the skill slots in `%SkillRow` above the card slots,
+  drawn as a squarer card with the skill's symbol and name (or empty). `flash()` lights it up when its
+  skill does something.
 - `scripts/shop.gd` — `Shop`: overlay after a won round. Rolls offers, sells them, and picks the card
   for a stamp.
 - `scripts/pile_button.gd` — `PileButton`: the draw and discard piles either side of the hand, drawn

@@ -71,6 +71,7 @@ const FIZZLED := Color(1, 0.5, 0.5, 0.6)
 @onready var hud_label: Label = %HudLabel
 @onready var boss_label: Label = %BossLabel
 @onready var trinket_row: HFlowContainer = %TrinketRow
+@onready var skill_row: HBoxContainer = %SkillRow
 @onready var draw_pile_button: PileButton = %DrawPileButton
 @onready var discard_button: PileButton = %DiscardButton
 @onready var slot_row: HBoxContainer = %SlotRow
@@ -247,6 +248,7 @@ func new_round() -> void:
 	pile_viewer.hide()
 	shop.hide()
 	_refresh_trinkets()
+	_refresh_skills()
 	start_turn()
 
 
@@ -954,6 +956,10 @@ func _on_crumb_collected(cell: Vector2i) -> void:
 	run.crumbs += worth
 	round_crumbs += worth
 	BugReport.note("  Picked up a crumb at %s (+%d)" % [cell, worth])
+	if run.has_skill(Items.Skill.EFFICIENT):
+		discards_left += 1
+		BugReport.note("  EFFICIENT: +1 discard (%d left)" % discards_left)
+		_flash_skill(Items.Skill.EFFICIENT)
 	_refresh_hud()
 
 
@@ -1026,6 +1032,26 @@ func _refresh_trinkets() -> void:
 		trinket_row.add_child(tag)
 
 
+## Fills the Items.SKILL_SLOTS skill slots above the card slots with the run's skills, the rest empty,
+## and turns on the ones the board applies.
+func _refresh_skills() -> void:
+	board.warp = run.has_skill(Items.Skill.WARP)
+	for child in skill_row.get_children():
+		skill_row.remove_child(child)
+		child.queue_free()
+	for i in Items.SKILL_SLOTS:
+		var slot := SkillSlot.new()
+		slot.skill = run.skills[i] if i < run.skills.size() else -1
+		skill_row.add_child(slot)
+
+
+## Lights up the slot holding skill, when it does something.
+func _flash_skill(skill: Items.Skill) -> void:
+	var i := run.skills.find(skill)
+	if i != -1 and i < skill_row.get_child_count():
+		(skill_row.get_child(i) as SkillSlot).flash()
+
+
 ## Rebuilds the pouch's consumable buttons in the hand header.
 func _refresh_pouch() -> void:
 	for child in pouch_row.get_children():
@@ -1053,11 +1079,12 @@ func _view_pile(title: String, cards: Array[CardData]) -> void:
 
 # Dev menu: shortcuts the F2 DevMenu calls. The menu logs each one with a "DEV:" note.
 
-## Redraws everything that shows the run: the HUD, pouch, trinkets and an open shop.
+## Redraws everything that shows the run: the HUD, pouch, trinkets, skills and an open shop.
 func refresh_ui() -> void:
 	_refresh_hud()
 	_refresh_pouch()
 	_refresh_trinkets()
+	_refresh_skills()
 	if shop.visible:
 		shop.refresh()
 	refresh_preview()
@@ -1192,12 +1219,16 @@ func _bug_report_state() -> String:
 	var trinket_names := PackedStringArray()
 	for trinket in run.trinkets:
 		trinket_names.append(Items.TRINKETS[trinket][0])
+	var skill_names := PackedStringArray()
+	for skill in run.skills:
+		skill_names.append(Items.SKILLS[skill][0])
 	var pouch_names := PackedStringArray()
 	for item in run.pouch:
 		pouch_names.append(Items.CONSUMABLES[item][0])
-	lines.append("Crumbs %d (%d picked up this round), trinkets: %s, pouch: %s%s" % [run.crumbs,
+	lines.append("Crumbs %d (%d picked up this round), trinkets: %s, skills: %s, pouch: %s%s" % [run.crumbs,
 		round_crumbs, ", ".join(trinket_names) if trinket_names else "-",
-		", ".join(pouch_names) if pouch_names else "-", ", thick fur used" if trap_survived else ""])
+		", ".join(skill_names) if skill_names else "-", ", ".join(pouch_names) if pouch_names else "-",
+		", thick fur used" if trap_survived else ""])
 	lines.append("Mouse %s facing %s, cheese %s, distance %d (%d by path)%s" % [board.mouse_cell,
 		Card.NAMES[board.facing], board.cheese_cell, _distance(board.mouse_cell, board.cheese_cell),
 		_path_distance(board.mouse_cell, board.cheese_cell), ", squeezing" if board.squeeze else ""])

@@ -1,13 +1,15 @@
 class_name Items
 extends RefCounted
-## What the shop sells: trinkets (passive for the rest of the run), consumables (held in the pouch,
-## used once) and card stamps.
+## What the shop sells: trinkets (passive for the rest of the run), skills (always on, held in the
+## SKILL_SLOTS slots above the card slots), consumables (held in the pouch, used once) and card stamps.
 
 enum Trinket { SPARE_PAWS, LUCKY_TAIL, THICK_FUR, CRUMB_MAGNET, PIGGY_BANK, BOUNTIFUL_HARVEST }
 enum Consumable { FRESH_BREEZE, CALM, NEW_PAWS, CHEESE_BAIT, SQUEEZE }
+enum Skill { WARP, EFFICIENT }
 
 const TRINKET_COLOR := Color("f5c542")
 const CONSUMABLE_COLOR := Color("6fd6c8")
+const SKILL_COLOR := Color("e86aa6")
 ## Name, description and price of each trinket.
 const TRINKETS := {
 	Trinket.SPARE_PAWS: ["SPARE PAWS", "+2 discards every round.", 6],
@@ -25,6 +27,13 @@ const CONSUMABLES := {
 	Consumable.CHEESE_BAIT: ["CHEESE BAIT", "Remove the trap nearest the mouse.", 4],
 	Consumable.SQUEEZE: ["SQUEEZE", "This turn the mouse squeezes through walls.", 3],
 }
+## Name, description and price of each skill.
+const SKILLS := {
+	Skill.WARP: ["WARP", "Every step off an edge brings the mouse in on the opposite side, as in a WRAP slot.", 10],
+	Skill.EFFICIENT: ["EFFICIENT", "Each crumb picked up on the board gives +1 discard this round.", 7],
+}
+## Skills the player can hold at once.
+const SKILL_SLOTS := 4
 ## Slot effects the shop can stamp onto a card. Only ones that work on a single card with no extra
 ## input: direction effects would just make it another direction card.
 const STAMPS: Array[CardSlot.Effect] = [

@@ -51,6 +51,8 @@ var _invincible := CheckBox.new()
 var _preview := CheckBox.new()
 ## Items.Trinket -> its CheckBox.
 var _trinket_boxes := {}
+## Items.Skill -> its CheckBox.
+var _skill_boxes := {}
 var _slot_effects: Array[OptionButton] = []
 var _card_dir := OptionButton.new()
 var _card_stamp: OptionButton
@@ -143,6 +145,8 @@ func _process(_delta: float) -> void:
 	_preview.set_pressed_no_signal(game.preview_on)
 	for trinket: int in _trinket_boxes:
 		(_trinket_boxes[trinket] as CheckBox).set_pressed_no_signal(run.has(trinket))
+	for skill: int in _skill_boxes:
+		(_skill_boxes[skill] as CheckBox).set_pressed_no_signal(run.has_skill(skill))
 	for i in _slot_effects.size():
 		_slot_effects[i].get_parent().visible = i < game.slots.size()
 		if i < game.slots.size() and _slot_effects[i].selected != game.slots[i].effect:
@@ -292,6 +296,19 @@ func _build_items_tab(box: VBoxContainer) -> void:
 		check.toggled.connect(_set_trinket.bind(trinket))
 		box.add_child(check)
 		_trinket_boxes[trinket] = check
+
+	_heading(box, "Skills (up to %d)" % Items.SKILL_SLOTS)
+	for skill: Items.Skill in Items.Skill.values():
+		var info: Array = Items.SKILLS[skill]
+		var check := CheckBox.new()
+		check.text = info[0]
+		check.icon = ItemIcon.skill(skill)
+		check.tooltip_text = info[1]
+		check.focus_mode = Control.FOCUS_NONE
+		check.add_theme_color_override("font_color", Items.SKILL_COLOR)
+		check.toggled.connect(_set_skill.bind(skill))
+		box.add_child(check)
+		_skill_boxes[skill] = check
 
 	_heading(box, "Consumables")
 	row = _row(box)
@@ -637,6 +654,18 @@ func _set_trinket(on: bool, trinket: Items.Trinket) -> void:
 		game.run.trinkets.erase(trinket)
 	game.refresh_ui()
 	_did("%s %s" % ["Added" if on else "Removed", Items.TRINKETS[trinket][0]])
+
+
+func _set_skill(on: bool, skill: Items.Skill) -> void:
+	if on and not game.run.has_skill(skill):
+		if game.run.skills.size() >= Items.SKILL_SLOTS:
+			_say("The skill slots are full.")
+			return
+		game.run.skills.append(skill)
+	elif not on:
+		game.run.skills.erase(skill)
+	game.refresh_ui()
+	_did("%s %s" % ["Added" if on else "Removed", Items.SKILLS[skill][0]])
 
 
 func _set_slot_effect(index: int, slot: int) -> void:

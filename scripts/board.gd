@@ -125,6 +125,9 @@ var invincible := false
 ## Set while the run has CRUMB MAGNET: the mouse also picks up crumbs on the cells next to it
 ## (up, down, left, right, not through a wall) wherever a move ends.
 var magnet := false
+## Set while the run has the WARP skill: every step off an edge comes in on the opposite side, as
+## step's wrap does for a WRAP slot.
+var warp := false
 ## Cells along each side of the board this round. Set it before placing anything.
 var grid := MAX_GRID:
 	set(value):
@@ -305,6 +308,7 @@ func copy_from(other: Board) -> void:
 	crumbs = other.crumbs.duplicate()
 	chests = other.chests.duplicate()
 	magnet = other.magnet
+	warp = other.warp
 	invincible = other.invincible
 	facing = other.facing
 	cats.clear()
@@ -586,9 +590,9 @@ func move_cheese(steps: int) -> void:
 		cheese_pos = Vector2(cheese_cell)
 
 
-## Moves the mouse one cell (bumping off walls and the edge, or coming in on the opposite side of an
-## edge if wrap is set), pushing a crate there on a cell and opening a locked door with a key. Returns
-## true if the move ends the round (see _finish).
+## Moves the mouse one cell (bumping off walls and the edge, or coming in on the opposite side of
+## an edge if wrap or warp is set), pushing a crate there on a cell and opening a locked door with a
+## key. Returns true if the move ends the round (see _finish).
 func step(dir: Card.Dir, wrap := false) -> bool:
 	facing = dir
 	var start := mouse_cell
@@ -608,7 +612,7 @@ func step(dir: Card.Dir, wrap := false) -> bool:
 		tween.tween_property(self, "mouse_pos", Vector2(target), STEP_TIME)
 		if _pushed != -1:
 			tween.parallel().tween_property(self, "_push_shift", Vector2.ZERO, STEP_TIME)
-	elif wrap and not _in_bounds(target) and not is_blocked(wrapped) and wrapped not in crates:
+	elif (wrap or warp) and not _in_bounds(target) and not is_blocked(wrapped) and wrapped not in crates:
 		target = wrapped
 		_trail_break()
 		mouse_cell = target
