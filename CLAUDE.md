@@ -4,8 +4,13 @@ A Godot 4.6 deckbuilder prototype. Each turn you draw a hand of direction cards 
 them in slots (4 to start), then Lock In: the mouse moves one cell per card, in slot order, on a square grid until it
 reaches the cheese, within the round's turn limit. Each turn about half the slots roll an **effect** (REVERSED, SLIDE, ECHO, BURN, ...)
 that changes how the card in that slot plays. Slot effects are where the game's content lives.
-Each round also gives `DISCARDS_PER_ROUND` (5) discards: right-click a card, or drag it down onto the
+Each round also gives `DISCARDS_PER_ROUND` (5) discards: right-click a card (on a touchscreen, hold it for `Card.HOLD_TIME`), or drag it down onto the
 discard area under the hand (lit while a card is dragged), to swap it for a new draw (`main.gd` `discard_card`).
+
+**Touch** (Android playtests): `DisplayServer.is_touchscreen_available()` turns on the hold-to-discard and
+puts Bug and Dev buttons after the trinkets (`main.gd` `_add_touch_button`) in place of F12 and F2.
+Desktop play is unchanged. To try it on a PC, set `Input.emulate_touch_from_mouse`. Bug reports from a
+phone save to `user://bug_reports`.
 
 The **Preview** checkbox in the F2 dev menu (`main.gd` `preview_on`) draws where the slotted cards would take the mouse, as a dashed
 line on the board ending in a ring (red cross if caught, green on the cheese, pale blue in glue, "?"
@@ -154,10 +159,10 @@ pays `Boss.WIN_CRUMBS`, adds a card slot and a card in hand, and offers a free t
   as a card stack with a count (card back / skull). The discard pile also takes dropped cards.
 - `scripts/pile_viewer.gd` — `PileViewer`: overlay opened from the pile buttons that lists a
   pile's cards, sorted by direction so the draw order stays hidden.
-- `scripts/bug_report.gd` — `BugReport`: F12 panel that saves a description, screenshot, game state
+- `scripts/bug_report.gd` — `BugReport`: F12 (or touch Bug button) panel that saves a description, screenshot, game state
   (`main.gd` `_bug_report_state`) and action log to `bug_reports/` (git-ignored). Log notable events
   with `BugReport.note()`.
-- `scripts/dev_menu.gd` — `DevMenu`: F2 drawer of dev tools (debug builds only; doesn't pause). Tabs
+- `scripts/dev_menu.gd` — `DevMenu`: F2 (or touch Dev button) drawer of dev tools (debug builds only; doesn't pause). Tabs
   for the run (restart/win/lose round, bosses, shop, speed, invincible), items, cards and slot
   effects, and a board brush that edits cells on click (`Board.cell_clicked`). It works through the
   `# Dev menu` methods at the end of `main.gd` and logs every change as `BugReport.note("DEV: ...")`.

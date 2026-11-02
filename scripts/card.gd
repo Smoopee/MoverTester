@@ -1,7 +1,7 @@
 class_name Card
 extends Button
 ## A movement card. Click it to move it between the hand and the slots, or drag it. Right-click it to
-## discard it.
+## discard it, or on a touchscreen hold it.
 
 signal card_dropped_on(card: Card)
 signal discard_requested
@@ -38,6 +38,14 @@ const ARROW_POINTS: Array[Vector2] = [
 	Vector2(0, -24), Vector2(18, -4), Vector2(6, -4), Vector2(6, 20),
 	Vector2(-6, 20), Vector2(-6, -4), Vector2(-18, -4),
 ]
+## Seconds a finger has to rest on a card to discard it, on a touchscreen.
+const HOLD_TIME := 0.5
+## Seconds into a hold before the card starts filling up, so a quick tap doesn't flash.
+const HOLD_SHOW := 0.15
+## Pixels the finger can wander during a hold before it's a drag instead.
+const HOLD_SLOP := 12.0
+## Main's DISCARD_COLOR, see-through.
+const HOLD_COLOR := Color(0.878, 0.478, 0.373, 0.5)
 
 ## The deck card this node shows. Set it, or dir, before adding the node to the tree.
 var data := CardData.new()
@@ -52,10 +60,15 @@ var stamp: CardSlot.Effect:
 	get:
 		return data.stamp
 
+## Seconds the card has been held down this press on a touchscreen, or -1 when it isn't being held.
+var _held := -1.0
+var _hold_from := Vector2.ZERO
+
 
 func _ready() -> void:
 	custom_minimum_size = card_size
 	focus_mode = Control.FOCUS_NONE
+	set_process(false)
 	mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	var color: Color = COLORS[dir]
 	add_theme_stylebox_override("normal", _make_style(Color("f4ecd8"), color))
@@ -93,6 +106,13 @@ func _draw() -> void:
 		draw_rect(Rect2(3, 3, size.x - 6, font_size + 6), info[2])
 		draw_string(get_theme_default_font(), Vector2(0, font_size + 4), info[0],
 				HORIZONTAL_ALIGNMENT_CENTER, size.x, font_size, Color("2a2420"))
+	# A hold fills the card from the bottom up.
+	if _held > HOLD_SHOW:
+		var filled := size.y * (_held - HOLD_SHOW) / (HOLD_TIME - HOLD_SHOW)
+		var fill := StyleBoxFlat.new()
+		fill.bg_color = HOLD_COLOR
+		fill.set_corner_radius_all(8)
+		draw_style_box(fill, Rect2(0, size.y - filled, size.x, filled))
 
 
 func _gui_input(event: InputEvent) -> void:
@@ -100,11 +120,39 @@ func _gui_input(event: InputEvent) -> void:
 	if button and button.button_index == MOUSE_BUTTON_RIGHT and button.pressed and not disabled:
 		accept_event()
 		discard_requested.emit()
+	elif button and button.button_index == MOUSE_BUTTON_LEFT and DisplayServer.is_touchscreen_available():
+		_hold_from = button.position
+		_set_held(0.0 if button.pressed and not disabled else -1.0)
+	elif event is InputEventMouseMotion and _held >= 0 and event.position.distance_to(_hold_from) > HOLD_SLOP:
+		_set_held(-1.0)
+
+
+## Counts up a hold, and discards the card once it's held long enough.
+func _process(delta: float) -> void:
+	if disabled:
+		_set_held(-1.0)
+		return
+	_held += delta
+	queue_redraw()
+	if _held < HOLD_TIME:
+		return
+	_set_held(-1.0)
+	# Disabling the button cancels its press, so lifting the finger doesn't also click the card.
+	disabled = true
+	disabled = false
+	discard_requested.emit()
+
+
+func _set_held(value: float) -> void:
+	_held = value
+	set_process(value >= 0)
+	queue_redraw()
 
 
 func _get_drag_data(_at_position: Vector2) -> Variant:
 	if disabled:
 		return null
+	_set_held(-1.0)
 	var preview := Card.new()
 	preview.data = data
 	preview.card_size = card_size
