@@ -92,11 +92,22 @@ for the rest of the run, from the next round (`main.gd` `_boss_upgrade`). `_buil
 slots at the start of a turn and shrinks the cards so the slots and the hand each fit their row.
 
 Rounds chain into an endless **run**: the deck, crumbs, trinkets, pouch, slots and hand size carry over until a trap
-or a cat catches the mouse (or a pylon or flamethrower), or the turns run out (`main.gd` `lost()`), which starts a new run. A won round pays crumbs (`WIN_CRUMBS` + unused discards, plus
+or a cat catches the mouse (or a pylon or flamethrower), or the turns run out, or a boss round ends short of its score target (`main.gd` `lost()`), which starts a new run. A won round pays crumbs (`WIN_CRUMBS` + unused discards + the score bonus, plus
 crumbs picked up on the board), then opens the **shop**. It sells trinkets (passive for the run),
 skills, consumables (held in the pouch, used once) and card stamps (a slot effect stuck on one card). A
 stamped card plays its slot's effect first, then its stamp (`main.gd` `_play`): a BURN slot with a
 SLIDE stamp moves 3 cells, then slides. A burned card stays burned whatever its stamp.
+
+Each round also has a **score** (`scripts/score.gd` `Score`, `main.gd` `round_score`), kept apart from
+crumbs, which are money. Each turn adds up points (`Score.CELL_POINTS` a cell walked, slid or
+jumped, plus crumbs, chests and rides on holes, belts and pads), times the turn's mult, which starts
+at 1. The board reports each move with `Board.mouse_moved` (a `Board.Motion`: STEP, SLIDE, JUMP, RIDE
+or BUMP) to `main.gd` `_on_mouse_moved`, `_score_cards` adds the mult that goes by the cards played,
+and `_bank_turn` adds the turn to the score, with `Score.SPARE_TURN_MULT` per turn left over on the
+turn that reaches the cheese. Only the real board is connected, so the preview scores nothing. The
+round's target (`Score.target`) grows each round, and more in a boss round. Meeting it pays bonus
+crumbs (`Score.crumbs`), and missing it in a boss round ends the run (`_short_of_boss_target`). The
+score trinkets are BUTTER PAWS, HARD HEAD, SHOW-OFF, JOYRIDE and DAREDEVIL.
 
 **Skills** (`Items.Skill`, `Run.skills`) are always-on abilities for the rest of the run, held in
 `Items.SKILL_SLOTS` (4) slots shown above the card slots (`main.gd` `_refresh_skills`). WARP makes
@@ -135,6 +146,8 @@ pays `Boss.WIN_CRUMBS`, adds a card slot and a card in hand, and offers a free t
   walks the cats at the end of a turn, `move_cheese()` runs the cheese for RUNAWAY CHEESE;
   `is_deadly(cell)` says whether moving onto a cell is fatal, and `in_blast(cell)` whether ending
   this turn there is.
+- `scripts/score.gd` — `Score`: the round score's tuning (points, mult, score trinket numbers), the
+  per-round `target()` and the bonus `crumbs()` it pays.
 - `scripts/hazard.gd` — `Hazard`: one shock pylon or flamethrower: `kind`, `cell`, `dir`, `period`
   and `timer` (turns until it goes off).
 - `scripts/cat.gd` — `Cat`: one roaming cat's cell and this turn's `path` (`steps` cells), and
@@ -194,7 +207,10 @@ Godot 4.6 is at `C:\Program Files\Godot\godot.exe` (the `*_console.exe` launcher
 
 The sim lets runs go on, so it prints win/loss rates per round number (the difficulty curve). Add
 `--round N` to play every round as round N, `--boss <name>` to make every round that boss, and
-`--slots N` / `--hand N` to start every run with that many slots / cards in hand.
+`--slots N` / `--hand N` to start every run with that many slots / cards in hand. The round table
+also shows the bot's mean score in won rounds against the target. The bot plays for the cheese, not the
+score, so its score is a floor. `--trinkets show_off,daredevil` starts every run with those
+trinkets.
 
 A new `class_name` script isn't visible to the parse check until Godot refreshes its class cache:
 `"/c/Program Files/Godot/godot.exe" --headless --path . --import`.

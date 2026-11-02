@@ -103,6 +103,14 @@ var busy := false
 var discards_left := DISCARDS_PER_ROUND
 ## Crumbs picked up on the board this round.
 var round_crumbs := 0
+## This round's score and the target it needs (see Score), and the points and mult this turn has
+## made so far, added to the score at the end of the turn (_bank_turn).
+var round_score := 0
+var score_target := 0
+var turn_points := 0
+var turn_mult := 1
+## What the last turn added to the score, for the HUD.
+var last_turn_score := ""
 ## What each chest opened this round gave, for the win panel.
 var chest_rewards := PackedStringArray()
 ## Shown in place of the hint at the start of the next turn, after a chest is opened.
@@ -127,6 +135,8 @@ var _preview_queued := false
 var _crate_lanes: Array[Vector2i] = []
 ## Shows the keys the mouse holds, next to the HUD, in rounds that have doors or keys.
 var _key_label := Label.new()
+## Shows the round's score and target, and this turn's points and mult while it plays, before the trinkets.
+var _score_label := Label.new()
 
 
 ## The game's theme: a dark, rounded panel behind every tooltip. It goes on the root window so it
@@ -169,10 +179,24 @@ func _ready() -> void:
 	board.chest_opened.connect(_open_chest)
 	board.key_collected.connect(_on_key_collected)
 	board.door_unlocked.connect(_on_door_unlocked)
+	board.mouse_moved.connect(_on_mouse_moved)
 	_key_label.add_theme_color_override("font_color", KEY_COLOR)
 	_key_label.add_theme_font_size_override("font_size", hud_label.get_theme_font_size("font_size"))
 	_key_label.size_flags_vertical = hud_label.size_flags_vertical
 	hud_label.add_sibling(_key_label)
+	_score_label.add_theme_color_override("font_color", Score.COLOR)
+	_score_label.add_theme_font_size_override("font_size", hud_label.get_theme_font_size("font_size"))
+	_score_label.size_flags_vertical = hud_label.size_flags_vertical
+	_score_label.mouse_filter = Control.MOUSE_FILTER_PASS
+	_score_label.tooltip_text = ("Each turn scores points times mult. Points: %d a cell moved, %d a crumb, %d a "
+		+ "chest, %d a ride on a hole, belt or pad. Mult starts at 1, and each turn left over adds %d on the "
+		+ "turn you reach the cheese. Meeting the target pays bonus crumbs; in a boss round, missing it ends "
+		+ "the run.") % [Score.CELL_POINTS, Score.CRUMB_POINTS, Score.CHEST_POINTS, Score.RIDE_POINTS,
+		Score.SPARE_TURN_MULT]
+	# On the right, before the trinkets: its text changes length every turn, and under the title it would
+	# widen the board's column and push the cards off the screen.
+	trinket_row.add_sibling(_score_label)
+	trinket_row.get_parent().move_child(_score_label, 0)
 	add_child(pile_viewer)
 	shop.next_round_pressed.connect(new_round)
 	add_child(shop)
@@ -259,6 +283,11 @@ func new_round() -> void:
 	if run.has(Items.Trinket.SPARE_PAWS):
 		discards_left += SPARE_PAWS_DISCARDS
 	round_crumbs = 0
+	round_score = 0
+	score_target = Score.target(run.round_number, run.boss != -1)
+	turn_points = 0
+	turn_mult = 1
+	last_turn_score = ""
 	chest_rewards.clear()
 	chest_note = ""
 	trap_survived = false
@@ -316,8 +345,11 @@ func lock_in() -> void:
 
 	BugReport.note("Lock in")
 	refresh_preview()
+	turn_points = 0
+	turn_mult = 1
 	var order := _play_order()
 	var reached := await _play_cards(order)
+	_score_cards(order.slice(0, reached))
 	# Set when the mouse reaches the cheese or is caught in a trap.
 	var ended := _round_over()
 	# Glue holds the mouse: the cards left don't move it.
@@ -354,6 +386,7 @@ func lock_in() -> void:
 	if not ended and turn >= turn_limit:
 		out_of_time = true
 		ended = true
+	_bank_turn()
 
 	var played: Array[CardData] = []
 	for card in _all_cards():
@@ -495,8 +528,13 @@ func _update_preview() -> void:
 
 ## Shows how the round ended: crumbs earned and the way to the shop, or the end of the run.
 func _end_round() -> void:
-	run_over = board.is_caught() or out_of_time
-	if out_of_time:
+	run_over = board.is_caught() or out_of_time or _short_of_boss_target()
+	if _short_of_boss_target():
+		BugReport.note("Short of the boss's score target: %d / %d in round %d" % [round_score, score_target,
+			run.round_number])
+		win_label.text = "%s wanted a score of %d. You scored %d." % [Boss.INFO[run.boss][0], score_target,
+			round_score]
+	elif out_of_time:
 		BugReport.note("Out of time on turn %d of round %d" % [turn, run.round_number])
 		win_label.text = "Click! The kitchen light came on." if run.boss == Boss.Kind.KITCHEN_LIGHT \
 			else "Out of time! Someone put the cheese away."
@@ -526,21 +564,29 @@ func _end_round() -> void:
 			var interest := mini(floori(run.crumbs / 5.0), PIGGY_BANK_MAX)
 			earned += interest
 			lines.append("Piggy bank  +%d" % interest)
+		var score_crumbs := Score.crumbs(round_score, score_target)
+		earned += score_crumbs
+		if score_crumbs > 0:
+			lines.append("Score %d of %d  +%d" % [round_score, score_target, score_crumbs])
+		else:
+			lines.append("Score %d, short of %d  +0" % [round_score, score_target])
 		if round_crumbs > 0:
 			lines.append("Crumbs picked up  +%d" % round_crumbs)
 		for chest in chest_rewards:
 			lines.append("Chest  %s" % chest)
 		run.crumbs += earned
 		lines.append("You have %d crumbs." % run.crumbs)
-		BugReport.note("Found the cheese on turn %d, earned %d (+%d picked up), %d crumbs" % [
-			turn, earned, round_crumbs, run.crumbs])
+		BugReport.note("Found the cheese on turn %d, score %d / %d, earned %d (+%d picked up), %d crumbs" % [
+			turn, round_score, score_target, earned, round_crumbs, run.crumbs])
 		win_label.text = "You found the cheese in %d turn%s!" % [turn, "" if turn == 1 else "s"]
 		if run.boss != -1:
 			run.bosses_beaten += 1
 			win_label.text = "You beat %s in %d turn%s!" % [Boss.INFO[run.boss][0], turn, "" if turn == 1 else "s"]
 			lines.append_array(_boss_upgrade())
 			lines.append("Take a free trinket in the shop.")
-		lines.append("Next round: %s." % Difficulty.describe(run.round_number + 1))
+		var next := run.round_number + 1
+		lines.append("Next round: %s, score target %d." % [Difficulty.describe(next),
+			Score.target(next, bosses_enabled and Boss.is_boss_round(next))])
 		win_details.text = "\n".join(lines)
 		win_panel_button.text = "Shop"
 	status_label.text = ""
@@ -559,9 +605,71 @@ func _on_win_panel_button() -> void:
 		shop.open(run, run.boss != -1)
 
 
-## True when the round ended the run: the mouse was caught, or the turns ran out.
+## True when the round ended the run: the mouse was caught, the turns ran out, or it reached the
+## cheese short of a boss round's score target.
 func lost() -> bool:
 	return run_over
+
+
+## True when the mouse reached the cheese in a boss round without meeting the score target.
+func _short_of_boss_target() -> bool:
+	return run.boss != -1 and board.mouse_cell == board.cheese_cell and not board.is_caught() \
+		and round_score < score_target
+
+
+## Scores a move of the mouse (Board.mouse_moved): points for the cells it moved and the rides it
+## took, and mult from BUTTER PAWS, HARD HEAD and JOYRIDE. Only the real board is connected, so the
+## preview scores nothing.
+func _on_mouse_moved(motion: Board.Motion, cells: int) -> void:
+	match motion:
+		Board.Motion.STEP, Board.Motion.JUMP:
+			turn_points += cells * Score.CELL_POINTS
+		Board.Motion.SLIDE:
+			turn_points += cells * Score.CELL_POINTS
+			if run.has(Items.Trinket.BUTTER_PAWS):
+				turn_points += cells * Score.BUTTER_PAWS_POINTS
+		Board.Motion.RIDE:
+			turn_points += Score.RIDE_POINTS
+			if run.has(Items.Trinket.JOYRIDE):
+				turn_mult += Score.JOYRIDE_MULT
+		Board.Motion.BUMP:
+			if run.has(Items.Trinket.HARD_HEAD):
+				turn_mult += Score.HARD_HEAD_MULT
+	_refresh_hud()
+
+
+## Adds the mult of the score trinkets that go by how the cards played, the slots in played: SHOW-OFF
+## for each slot effect and stamp, and DAREDEVIL when they left the mouse next to a trap, a cat or a
+## cat's path.
+func _score_cards(played: Array[CardSlot]) -> void:
+	if run.has(Items.Trinket.SHOW_OFF):
+		var effects := 0
+		for slot in played:
+			var card := slot.get_card()
+			if card:
+				effects += int(slot.effect != CardSlot.Effect.NONE) + int(card.stamp != CardSlot.Effect.NONE)
+		turn_mult += effects * Score.SHOW_OFF_MULT
+	if run.has(Items.Trinket.DAREDEVIL) and not _round_over():
+		for offset: Vector2i in Card.OFFSETS.values():
+			if board.is_deadly(board.mouse_cell + offset):
+				turn_mult *= Score.DAREDEVIL_TIMES
+				BugReport.note("  DAREDEVIL: next to danger at %s" % (board.mouse_cell + offset))
+				break
+	_refresh_hud()
+
+
+## Adds this turn's points times its mult to the round's score. On the turn that reaches the cheese,
+## each turn left over first adds Score.SPARE_TURN_MULT to the mult.
+func _bank_turn() -> void:
+	if board.mouse_cell == board.cheese_cell and not board.is_caught():
+		turn_mult += (turn_limit - turn) * Score.SPARE_TURN_MULT
+	var gained := turn_points * turn_mult
+	round_score += gained
+	last_turn_score = "+%d (%d × %d)" % [gained, turn_points, turn_mult]
+	BugReport.note("Turn score %d x %d = %d, round score %d / %d" % [turn_points, turn_mult, gained,
+		round_score, score_target])
+	turn_points = 0
+	turn_mult = 1
 
 
 ## If the mouse is on a trap and THICK FUR hasn't been used this round, breaks the trap and returns
@@ -698,6 +806,7 @@ func _hand_size() -> int:
 ## Pays CHEST_CRUMBS.
 func _open_chest(cell: Vector2i) -> void:
 	run.crumbs += CHEST_CRUMBS
+	turn_points += Score.CHEST_POINTS
 	var text := "+%d" % CHEST_CRUMBS
 	chest_note = "Chest! %d crumbs." % CHEST_CRUMBS
 	_refresh_hud()
@@ -971,6 +1080,7 @@ func _on_crumb_collected(cell: Vector2i) -> void:
 	var worth := 1 + (HARVEST_CRUMBS if run.has(Items.Trinket.BOUNTIFUL_HARVEST) else 0)
 	run.crumbs += worth
 	round_crumbs += worth
+	turn_points += Score.CRUMB_POINTS
 	BugReport.note("  Picked up a crumb at %s (+%d)" % [cell, worth])
 	if run.has_skill(Items.Skill.EFFICIENT):
 		discards_left += 1
@@ -1013,6 +1123,13 @@ func _refresh_hud() -> void:
 	hud_label.text = "Round %d · Turn %d of %d · %d crumbs" % [run.round_number, turn, turn_limit, run.crumbs]
 	_key_label.visible = board.keys_held > 0 or not board.keys.is_empty() or not board.doors.is_empty()
 	_key_label.text = "· %d key%s" % [board.keys_held, "" if board.keys_held == 1 else "s"]
+	_score_label.text = "Score %d / %d" % [round_score, score_target]
+	if busy:
+		_score_label.text += "  ·  this turn %d × %d" % [turn_points, turn_mult]
+	elif last_turn_score:
+		_score_label.text += "  ·  last turn %s" % last_turn_score
+	_score_label.add_theme_color_override("font_color",
+		Color("7ee08a") if round_score >= score_target else Score.COLOR)
 	boss_label.visible = run.boss != -1
 	if run.boss != -1:
 		boss_label.text = "BOSS  %s" % Boss.describe(run.boss)
@@ -1122,12 +1239,14 @@ func restart_round(boss: int) -> void:
 	bosses_enabled = saved_enabled
 
 
-## Ends the round as a win: the mouse jumps onto the cheese, then the usual payout and the shop.
+## Ends the round as a win: the mouse jumps onto the cheese, then the usual payout and the shop. The
+## score is raised to the target, so a boss round counts as won.
 func win_round() -> void:
 	if busy or win_panel.visible or shop.visible:
 		return
 	_clear_cards()
 	out_of_time = false
+	round_score = maxi(round_score, score_target)
 	board.mouse_cell = board.cheese_cell
 	board.mouse_pos = Vector2(board.cheese_cell)
 	_end_round()
@@ -1224,6 +1343,8 @@ func _bug_report_state() -> String:
 			outcome = "  (caught by a %s)" % Hazard.NAMES[board.blasted_by.kind]
 		elif board.is_caught():
 			outcome = "  (caught by a cat)" if board.caught_by_cat() else "  (caught in a trap)"
+		elif _short_of_boss_target():
+			outcome = "  (short of the boss's score target)"
 		else:
 			outcome = "  (won)"
 	elif shop.visible:
@@ -1232,6 +1353,8 @@ func _bug_report_state() -> String:
 		turn_limit, "  (moving)" if busy else "", outcome, discards_left, board.grid, board.grid])
 	lines.append("Boss: %s, next boss %s, %d beaten" % [Boss.INFO[run.boss][0] if run.boss != -1 else "-",
 		Boss.INFO[run.next_boss][0], run.bosses_beaten])
+	lines.append("Score %d / %d, this turn %d x %d, last turn %s" % [round_score, score_target, turn_points,
+		turn_mult, last_turn_score if last_turn_score else "-"])
 	var trinket_names := PackedStringArray()
 	for trinket in run.trinkets:
 		trinket_names.append(Items.TRINKETS[trinket][0])
