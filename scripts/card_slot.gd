@@ -7,13 +7,15 @@ signal card_dropped(card: Card)
 enum Effect {
 	NONE,
 	# Change the direction.
-	REVERSED, ROTATE_CW, ROTATE_CCW, MIRROR, WILD, GAMBLE,
+	REVERSED, ROTATE_CW, ROTATE_CCW, MIRROR, WILD, GAMBLE, SWIVEL,
 	# Change the distance.
-	DOUBLE, LEAP, SLIDE, WRAP, DIAGONAL,
+	DOUBLE, LEAP, SLIDE, WRAP, DIAGONAL, STRIDE,
 	# Change when or whether it plays.
-	ECHO, LAST, BLOCKED, SNIFF,
+	ECHO, LAST, BLOCKED, SNIFF, STEADY,
 	# Change the deck.
 	RECYCLE, BURN, COPY,
+	# Change the score.
+	SHINY,
 }
 
 const DIRECTION_COLOR := Color("6fb3ff")
@@ -21,6 +23,11 @@ const DISTANCE_COLOR := Color("ffb35c")
 const ORDER_COLOR := Color("c792ff")
 const DECK_COLOR := Color("7ed68a")
 const BLOCKED_COLOR := Color("e06060")
+## Most cells a STRIDE stamp can be set to move (CardData.stride).
+const MAX_STRIDE := 4
+## Effects only stamps have, which slots never roll. Each needs the card it's on: STRIDE and SWIVEL
+## are set on the card, STEADY ignores the slot, SHINY goes with the card.
+const STAMP_ONLY: Array[Effect] = [Effect.STRIDE, Effect.SWIVEL, Effect.STEADY, Effect.SHINY]
 ## Name, description and color of each effect.
 const INFO := {
 	Effect.NONE: ["", "", Color(1, 1, 1, 0.35)],
@@ -30,18 +37,24 @@ const INFO := {
 	Effect.MIRROR: ["MIRROR", "Swaps left and right. Up and down stay the same.", DIRECTION_COLOR],
 	Effect.WILD: ["WILD", "Ignores the card's arrow. Click the label to pick the direction.", DIRECTION_COLOR],
 	Effect.GAMBLE: ["GAMBLE", "Moves 3 cells in a random direction.", DIRECTION_COLOR],
+	Effect.SWIVEL: ["SWIVEL", "Click the stamp on the card to turn its arrow a quarter turn clockwise.",
+		DIRECTION_COLOR],
 	Effect.DOUBLE: ["DOUBLE", "Moves twice.", DISTANCE_COLOR],
 	Effect.LEAP: ["LEAP", "Jumps 2 cells, passing over the cell in between. A wall stops it short.", DISTANCE_COLOR],
 	Effect.SLIDE: ["SLIDE", "Keeps going until it hits a wall, a trap, a cat's path, glue, a mouse hole or the cheese.", DISTANCE_COLOR],
 	Effect.WRAP: ["WRAP", "Going off an edge brings the mouse in on the opposite side.", DISTANCE_COLOR],
 	Effect.DIAGONAL: ["DIAGONAL", "Joins with the next card into one diagonal hop.", DISTANCE_COLOR],
+	Effect.STRIDE: ["STRIDE", "Moves 1 to %d cells, as many as you pick. Click the stamp on the card to change it." %
+		MAX_STRIDE, DISTANCE_COLOR],
 	Effect.ECHO: ["ECHO", "Repeats the previous move, then plays this card.", ORDER_COLOR],
 	Effect.LAST: ["LAST", "Plays after all the other slots.", ORDER_COLOR],
 	Effect.BLOCKED: ["BLOCKED", "No card can go here this turn.", BLOCKED_COLOR],
 	Effect.SNIFF: ["SNIFF", "Only moves if that takes the mouse closer to the cheese, going around walls.", ORDER_COLOR],
+	Effect.STEADY: ["STEADY", "Ignores the slot's effect: the card plays as if its slot were plain.", ORDER_COLOR],
 	Effect.RECYCLE: ["RECYCLE", "This card comes back to your hand next turn.", DECK_COLOR],
 	Effect.BURN: ["BURN", "Moves 3 cells, then the card is gone for the rest of the round.", DECK_COLOR],
 	Effect.COPY: ["COPY", "Adds a copy of this card to your deck.", DECK_COLOR],
+	Effect.SHINY: ["SHINY", "Score: +%d mult for the turn when the card plays." % Score.SHINY_MULT, Score.COLOR],
 }
 
 var number := 1

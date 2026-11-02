@@ -28,6 +28,8 @@ const HARD_HEAD_MULT := 1
 const SHOW_OFF_MULT := 1
 const JOYRIDE_MULT := 2
 const DAREDEVIL_TIMES := 2
+## Mult a card with the SHINY stamp adds when it plays.
+const SHINY_MULT := 2
 const COLOR := Color("8fd3ff")
 
 

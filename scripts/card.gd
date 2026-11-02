@@ -5,6 +5,8 @@ extends Button
 
 signal card_dropped_on(card: Card)
 signal discard_requested
+## The player set its STRIDE or SWIVEL stamp: a new distance or direction.
+signal stamp_set
 
 enum Dir { UP, DOWN, LEFT, RIGHT }
 
@@ -46,6 +48,11 @@ const HOLD_SHOW := 0.15
 const HOLD_SLOP := 12.0
 ## Main's DISCARD_COLOR, see-through.
 const HOLD_COLOR := Color(0.878, 0.478, 0.373, 0.5)
+## Stamps set by clicking the stamp band on a card in play.
+const SET_STAMPS: Array[CardSlot.Effect] = [CardSlot.Effect.STRIDE, CardSlot.Effect.SWIVEL]
+## Stamps that don't play after the slot's effect, so their tooltips don't say they do.
+const QUIET_STAMPS: Array[CardSlot.Effect] = [CardSlot.Effect.SWIVEL, CardSlot.Effect.STEADY,
+	CardSlot.Effect.SHINY]
 
 ## The deck card this node shows. Set it, or dir, before adding the node to the tree.
 var data := CardData.new()
@@ -59,6 +66,9 @@ var dir: Dir:
 var stamp: CardSlot.Effect:
 	get:
 		return data.stamp
+## True for cards in play, where clicking a STRIDE or SWIVEL stamp sets it (SET_STAMPS). Elsewhere
+## (the shop's card picker, the pile viewer) a click on it is a click on the card.
+var set_on_click := false
 
 ## Seconds the card has been held down this press on a touchscreen, or -1 when it isn't being held.
 var _held := -1.0
@@ -70,14 +80,23 @@ func _ready() -> void:
 	focus_mode = Control.FOCUS_NONE
 	set_process(false)
 	mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	_restyle()
+	if stamp != CardSlot.Effect.NONE:
+		tooltip_text = "%s stamp: %s" % [CardSlot.INFO[stamp][0], _stamp_text()]
+
+
+## Borders the card in its direction's color.
+func _restyle() -> void:
 	var color: Color = COLORS[dir]
 	add_theme_stylebox_override("normal", _make_style(Color("f4ecd8"), color))
 	add_theme_stylebox_override("hover", _make_style(Color("fffaf0"), color))
 	add_theme_stylebox_override("pressed", _make_style(Color("e6dcc4"), color))
 	add_theme_stylebox_override("disabled", _make_style(Color("f4ecd8"), color))
-	if stamp != CardSlot.Effect.NONE:
-		var info: Array = CardSlot.INFO[stamp]
-		tooltip_text = "%s stamp: %s Plays after the slot's own effect." % [info[0], info[1]]
+
+
+func _stamp_text() -> String:
+	var text: String = CardSlot.INFO[stamp][1]
+	return text if stamp in QUIET_STAMPS else text + " Plays after the slot's own effect."
 
 
 ## Resizes the card, as it moves between the hand and a slot, which hold different sizes of card.
@@ -89,7 +108,7 @@ func resize(value: Vector2) -> void:
 
 func _make_custom_tooltip(_for_text: String) -> Object:
 	var info: Array = CardSlot.INFO[stamp]
-	return CardSlot.make_tooltip(info[0], info[2], "%s Plays after the slot's own effect." % info[1], "STAMP")
+	return CardSlot.make_tooltip(info[0], info[2], _stamp_text(), "STAMP")
 
 
 func _draw() -> void:
@@ -102,9 +121,9 @@ func _draw() -> void:
 			HORIZONTAL_ALIGNMENT_CENTER, size.x, maxi(roundi(14 * zoom), 10), color.darkened(0.25))
 	if stamp != CardSlot.Effect.NONE:
 		var info: Array = CardSlot.INFO[stamp]
-		var font_size := maxi(roundi(12 * zoom), 9)
-		draw_rect(Rect2(3, 3, size.x - 6, font_size + 6), info[2])
-		draw_string(get_theme_default_font(), Vector2(0, font_size + 4), info[0],
+		var font_size := _stamp_font_size()
+		draw_rect(_stamp_rect(), info[2])
+		draw_string(get_theme_default_font(), Vector2(0, font_size + 4), data.stamp_name(),
 				HORIZONTAL_ALIGNMENT_CENTER, size.x, font_size, Color("2a2420"))
 	# A hold fills the card from the bottom up.
 	if _held > HOLD_SHOW:
@@ -115,11 +134,33 @@ func _draw() -> void:
 		draw_style_box(fill, Rect2(0, size.y - filled, size.x, filled))
 
 
+func _stamp_font_size() -> int:
+	return maxi(roundi(12 * size.x / CARD_SIZE.x), 9)
+
+
+## The band across the top of the card that shows its stamp.
+func _stamp_rect() -> Rect2:
+	return Rect2(3, 3, size.x - 6, _stamp_font_size() + 6)
+
+
 func _gui_input(event: InputEvent) -> void:
 	var button := event as InputEventMouseButton
 	if button and button.button_index == MOUSE_BUTTON_RIGHT and button.pressed and not disabled:
 		accept_event()
 		discard_requested.emit()
+	elif button and button.button_index == MOUSE_BUTTON_LEFT and button.pressed and not disabled \
+			and set_on_click and stamp in SET_STAMPS and _stamp_rect().has_point(button.position):
+		# Taken before the button sees it, so setting the stamp doesn't also move the card.
+		accept_event()
+		var old := data.label()
+		if stamp == CardSlot.Effect.STRIDE:
+			data.next_stride()
+		else:
+			data.swivel()
+			_restyle()
+		BugReport.note("Set %s -> %s" % [old, data.label()])
+		queue_redraw()
+		stamp_set.emit()
 	elif button and button.button_index == MOUSE_BUTTON_LEFT and DisplayServer.is_touchscreen_available():
 		_hold_from = button.position
 		_set_held(0.0 if button.pressed and not disabled else -1.0)
