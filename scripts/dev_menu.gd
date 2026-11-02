@@ -28,6 +28,26 @@ const BRUSH_HINTS := {
 	Brush.PYLON: "adds a shock pylon that goes off every %d turns. Clicking one counts it down a turn, and at 1 removes it" % DEV_HAZARD_PERIOD,
 	Brush.FLAMER: "adds a flamethrower aimed at the side nearest the click, or turns one that way. Clicking the side it aims at counts it down a turn, and at 1 removes it",
 }
+## The obstacle each brush paints, or a part of it. The dropdown lists brushes by obstacle group, and
+## brushes left out here under "Board pieces" at the end.
+const BRUSH_OBSTACLES := {
+	Brush.TRAP: Obstacle.Kind.TRAP,
+	Brush.GLUE: Obstacle.Kind.GLUE,
+	Brush.FLOORBOARD: Obstacle.Kind.FLOORBOARD,
+	Brush.WALL: Obstacle.Kind.WALL,
+	Brush.CHASM: Obstacle.Kind.CHASM,
+	Brush.CAT: Obstacle.Kind.CAT,
+	Brush.PYLON: Obstacle.Kind.PYLON,
+	Brush.FLAMER: Obstacle.Kind.FLAMER,
+	Brush.JUMP_PAD: Obstacle.Kind.JUMP_PAD,
+	Brush.HOLE: Obstacle.Kind.HOLE,
+	Brush.CONVEYOR: Obstacle.Kind.CONVEYOR,
+	Brush.DOOR: Obstacle.Kind.DOOR,
+	Brush.KEY: Obstacle.Kind.DOOR,
+	Brush.PLATE: Obstacle.Kind.SWITCH,
+	Brush.GATE: Obstacle.Kind.SWITCH,
+	Brush.CRATE: Obstacle.Kind.SWITCH,
+}
 ## Turns between going off for a pylon or flamethrower the brush adds.
 const DEV_HAZARD_PERIOD := 3
 ## Labels of the speed dropdown. The last one turns animation off.
@@ -421,11 +441,20 @@ func _build_board_tab(box: VBoxContainer) -> void:
 	_heading(box, "Brush")
 	var row := _row(box)
 	var brush := OptionButton.new()
-	for label: String in BRUSH_NAMES:
-		brush.add_item(label)
+	brush.add_item(BRUSH_NAMES[Brush.OFF], Brush.OFF)
+	for group: Obstacle.Group in Obstacle.Group.values():
+		brush.add_separator(Obstacle.GROUP_INFO[group].name)
+		for kind: Obstacle.Kind in Obstacle.kinds_in(group):
+			for id: Brush in BRUSH_OBSTACLES:
+				if BRUSH_OBSTACLES[id] == kind:
+					brush.add_item(BRUSH_NAMES[id], id)
+	brush.add_separator("Board pieces")
+	for id: Brush in Brush.values():
+		if id != Brush.OFF and not BRUSH_OBSTACLES.has(id):
+			brush.add_item(BRUSH_NAMES[id], id)
 	brush.focus_mode = Control.FOCUS_NONE
 	brush.item_selected.connect(func(index: int) -> void:
-		_brush = index as Brush
+		_brush = brush.get_item_id(index) as Brush
 		_say("" if _brush == Brush.OFF else "Click a cell on the board: %s." % [
 			BRUSH_HINTS.get(_brush, "adds or removes a %s" % BRUSH_NAMES[_brush].to_lower())]))
 	row.add_child(brush)

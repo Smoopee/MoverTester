@@ -87,6 +87,8 @@ const FIZZLED := Color(1, 0.5, 0.5, 0.6)
 var run := Run.new()
 var pile_viewer := PileViewer.new()
 var shop := Shop.new()
+## Shown under the win panel's button once the run is won, to start over instead of going on.
+var new_run_button := Button.new()
 var slots: Array[CardSlot] = []
 ## Size of the cards in the slots, smaller when there are more slots, and in the hand, smaller in a
 ## bigger hand. A card resizes as it moves between them.
@@ -174,6 +176,12 @@ func _ready() -> void:
 	_preview_board.hide()
 	add_child(_preview_board)
 	win_panel_button.pressed.connect(_on_win_panel_button)
+	new_run_button.text = "New Run"
+	new_run_button.custom_minimum_size = win_panel_button.custom_minimum_size
+	new_run_button.add_theme_font_size_override("font_size", 20)
+	new_run_button.hide()
+	new_run_button.pressed.connect(new_run)
+	win_panel_button.add_sibling(new_run_button)
 	# The piles are replaced each round, so look them up when the button is pressed.
 	draw_pile_button.pressed.connect(func() -> void: _view_pile("Draw pile", run.deck.draw_pile))
 	discard_button.pressed.connect(func() -> void: _view_pile("Discard", run.deck.discard_pile))
@@ -587,11 +595,16 @@ func _end_round() -> void:
 			win_label.text = "You beat %s in %d turn%s!" % [Boss.INFO[run.boss][0], turn, "" if turn == 1 else "s"]
 			lines.append_array(_boss_upgrade())
 			lines.append("Take a free trinket in the shop.")
+		if won_run():
+			BugReport.note("Won the run on round %d" % run.round_number)
+			win_label.text = "You won the run!"
+			lines.append("Keep going in endless mode, or start a new run.")
 		var next := run.round_number + 1
 		lines.append("Next round: %s, score target %d." % [Difficulty.describe(next),
 			Score.target(next, bosses_enabled and Boss.is_boss_round(next))])
 		win_details.text = "\n".join(lines)
-		win_panel_button.text = "Shop"
+		win_panel_button.text = "Endless" if won_run() else "Shop"
+	new_run_button.visible = won_run()
 	status_label.text = ""
 	win_panel.show()
 	refresh_preview()
@@ -604,6 +617,9 @@ func _on_win_panel_button() -> void:
 	if lost():
 		new_run()
 	else:
+		if won_run():
+			run.endless = true
+			BugReport.note("Going on in endless mode")
 		win_panel.hide()
 		shop.open(run, run.boss != -1)
 
@@ -612,6 +628,11 @@ func _on_win_panel_button() -> void:
 ## cheese short of a boss round's score target.
 func lost() -> bool:
 	return run_over
+
+
+## At the end of a round, true when it won the run: round Run.GOAL_ROUNDS won, before endless mode.
+func won_run() -> bool:
+	return not lost() and run.round_number == Run.GOAL_ROUNDS and not run.endless
 
 
 ## True when the mouse reached the cheese in a boss round without meeting the score target.
@@ -1204,7 +1225,9 @@ func _clear_cards() -> void:
 
 
 func _refresh_hud() -> void:
-	hud_label.text = "Round %d · Turn %d of %d · %d crumbs" % [run.round_number, turn, turn_limit, run.crumbs]
+	var round_text := "Endless round %d" % run.round_number if run.endless or run.round_number > Run.GOAL_ROUNDS \
+		else "Round %d of %d" % [run.round_number, Run.GOAL_ROUNDS]
+	hud_label.text = "%s · Turn %d of %d · %d crumbs" % [round_text, turn, turn_limit, run.crumbs]
 	_key_label.visible = board.keys_held > 0 or not board.keys.is_empty() or not board.doors.is_empty()
 	_key_label.text = "· %d key%s" % [board.keys_held, "" if board.keys_held == 1 else "s"]
 	_score_label.text = "Score %d / %d" % [round_score, score_target]

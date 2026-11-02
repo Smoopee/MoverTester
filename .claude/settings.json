@@ -8,6 +8,11 @@
             "type": "command",
             "command": "powershell -NoProfile -ExecutionPolicy Bypass -File \"$CLAUDE_PROJECT_DIR/.claude/hooks/godot-check.ps1\"",
             "timeout": 90
+          },
+          {
+            "type": "command",
+            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File \"$CLAUDE_PROJECT_DIR/.claude/hooks/sheet-reminder.ps1\"",
+            "timeout": 15
           }
         ]
       }

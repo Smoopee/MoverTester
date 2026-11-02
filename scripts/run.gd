@@ -7,6 +7,8 @@ const START_SLOTS := 4
 const MAX_SLOTS := 8
 const START_HAND_SIZE := 6
 const MAX_HAND_SIZE := 10
+## Beating this round (a boss round) wins the run. The player can then go on in endless mode.
+const GOAL_ROUNDS := 21
 
 var deck := Deck.new()
 ## Card slots each turn.
@@ -26,6 +28,8 @@ var boss := -1
 ## The Boss.Kind of the next boss round, shown in the shop before it.
 var next_boss: Boss.Kind = Boss.roll()
 var bosses_beaten := 0
+## Set when the player goes on past GOAL_ROUNDS after winning the run.
+var endless := false
 
 
 func _init() -> void:
