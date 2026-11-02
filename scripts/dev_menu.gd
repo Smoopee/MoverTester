@@ -83,9 +83,24 @@ func _ready() -> void:
 	var title := Label.new()
 	title.text = "Dev tools"
 	title.add_theme_font_size_override("font_size", 22)
-	vbox.add_child(title)
+	var touch := DisplayServer.is_touchscreen_available()
+	if touch:
+		# The drawer covers main.gd's Dev button, so a touchscreen needs a way to close it in here.
+		var title_row := HBoxContainer.new()
+		title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		title_row.add_child(title)
+		var close := Button.new()
+		close.text = "Close"
+		close.focus_mode = Control.FOCUS_NONE
+		close.custom_minimum_size = Vector2(80, 40)
+		close.pressed.connect(toggle)
+		title_row.add_child(close)
+		vbox.add_child(title_row)
+	else:
+		vbox.add_child(title)
 	var hint := Label.new()
-	hint.text = "F2 or Esc closes. Changes are logged for F12 bug reports."
+	hint.text = "Changes are logged for bug reports." if touch \
+			else "F2 or Esc closes. Changes are logged for F12 bug reports."
 	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	hint.modulate = Color(1, 1, 1, 0.6)
 	hint.add_theme_font_size_override("font_size", 12)
@@ -116,14 +131,19 @@ func _input(event: InputEvent) -> void:
 	if key == null or not key.pressed or key.echo:
 		return
 	if key.keycode == KEY:
-		_panel.visible = not _panel.visible
-		_feedback.text = ""
+		toggle()
 	# An open pile viewer gets Esc first.
 	elif _panel.visible and key.keycode == KEY_ESCAPE and not game.pile_viewer.visible:
 		_panel.hide()
 	else:
 		return
 	get_viewport().set_input_as_handled()
+
+
+## Opens or closes the drawer. F2 does, and on a touchscreen main.gd's Dev button.
+func toggle() -> void:
+	_panel.visible = not _panel.visible
+	_feedback.text = ""
 
 
 ## Keeps the readout and the controls in step with the game, which changes them too (a new run, a

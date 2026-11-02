@@ -154,7 +154,8 @@ func _ready() -> void:
 	discard_card_button.set_drag_forwarding(Callable(), _can_drop_on_discard, _drop_on_discard)
 	discard_button.set_drag_forwarding(Callable(), _can_drop_on_discard, _drop_on_discard)
 	discard_card_button.pressed.connect(func() -> void:
-		status_label.text = "Drag a card down here, or right-click it, to swap it for a new one.")
+		status_label.text = "Drag a card down here, or %s it, to swap it for a new one." % [
+			"hold" if DisplayServer.is_touchscreen_available() else "right-click"])
 	_light_discard_area(false)
 	lock_in_button.pressed.connect(lock_in)
 	_preview_board.animate = false
@@ -178,12 +179,29 @@ func _ready() -> void:
 	var bug_report := BugReport.new()
 	bug_report.get_state = _bug_report_state
 	add_child(bug_report)
+	# Phones have no F2 or F12 key, so on a touchscreen buttons after the trinkets open them.
+	var touch := DisplayServer.is_touchscreen_available()
+	if touch:
+		_add_touch_button("Bug", bug_report.open)
 	# True in the editor and debug exports, false in release exports.
 	if OS.is_debug_build():
 		var dev_menu := DevMenu.new()
 		dev_menu.game = self
 		add_child(dev_menu)
+		if touch:
+			_add_touch_button("Dev", dev_menu.toggle)
 	new_run()
+
+
+## Adds a button after the trinkets, top right, sized for a finger.
+func _add_touch_button(text: String, on_pressed: Callable) -> void:
+	var button := Button.new()
+	button.text = text
+	button.focus_mode = Control.FOCUS_NONE
+	button.custom_minimum_size = Vector2(64, 40)
+	button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	button.pressed.connect(on_pressed)
+	trinket_row.get_parent().add_child(button)
 
 
 ## Starts over with the starting deck, no crumbs and no items.
