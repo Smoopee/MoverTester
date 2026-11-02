@@ -42,6 +42,7 @@ mouse, cheese, a trap or a crumb. They act on the cell a move ends on, except wh
 - **Glue**: the mouse sticks for the rest of the turn (`Board.stuck`; `lock_in` fizzles the cards
   left). Slides stop on it; jumps pass over it.
 - **Mouse holes**, in linked pairs (`holes[0]` with `holes[1]`, ...): pop out of the other one.
+  Slides stop on one (and go down it); jumps pass over it.
 - **Conveyor belts**: carry the mouse a cell the belt's way, and on along the belt. Never placed
   to push into a wall, off the board or onto a trap.
 - **Creaky floorboards**: break into a gap (`broken`) once the mouse walks, slides or jumps off.

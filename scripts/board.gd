@@ -626,9 +626,9 @@ func step(dir: Card.Dir, wrap := false) -> bool:
 	return await _finish(tween, start)
 
 
-## Moves the mouse in a straight line until it hits a wall, a gap, a crate, a trap, a cat's path, glue
-## or the cheese. With a key in hand it opens a locked door on the way. Sliding into a crate right next
-## to the mouse pushes it a cell, like a step.
+## Moves the mouse in a straight line until it hits a wall, a gap, a crate, a trap, a cat's path, glue,
+## a mouse hole (which it then goes down) or the cheese. With a key in hand it opens a locked door on
+## the way. Sliding into a crate right next to the mouse pushes it a cell, like a step.
 func slide(dir: Card.Dir) -> bool:
 	var offset: Vector2i = Card.OFFSETS[dir]
 	if not _mouse_can_step(mouse_cell, mouse_cell + offset, true):
@@ -637,7 +637,7 @@ func slide(dir: Card.Dir) -> bool:
 	var start := mouse_cell
 	var passed: Array[Vector2i] = []
 	while _mouse_can_step(mouse_cell, mouse_cell + offset, true) and mouse_cell != cheese_cell and not is_caught() \
-			and (passed.is_empty() or mouse_cell not in glue):
+			and (passed.is_empty() or (mouse_cell not in glue and _hole_exit(mouse_cell) == mouse_cell)):
 		_unlock(mouse_cell, mouse_cell + offset)
 		mouse_cell += offset
 		passed.append(mouse_cell)
