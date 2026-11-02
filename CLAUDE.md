@@ -40,9 +40,16 @@ pass over).
   leaves all cells reachable.
 
 ### Structure denial: shape the board
-- **Walls**: segments on cell edges, laid in short runs that can turn corners (`main.gd`
-  `_place_walls`, which rejects any run that would cut a cell off). Nothing walks, slides or jumps
-  through a wall, except the mouse during a turn of the SQUEEZE consumable.
+- **Walls**: segments on cell edges, laid in long runs (3 up to `WALL_SPAN` of the board's side)
+  that turn a corner at most once, starting from the board's edge or the loose end of another wall
+  and stopping where they meet one, so walls join up into dividers (`main.gd` `_wall_run`). Each run
+  is the one of `WALL_TRIES` that most lengthens the way to the cheese, then the way to the most
+  cells (`_place_walls`): a run that does neither much (`WALL_MIN_REACH`) is left out, the walls
+  together add at most `WALL_DETOUR` of the board's side to the way to the cheese, and a run is cut
+  short rather than cut a cell off. Dead ends the walls make off the way to the cheese are
+  **pockets** (`_pockets`): the chest goes in one (a U of wall is laid for it if there's none,
+  `_place_pocket`) and the rest get a crumb, so a dead end always holds a reward. Nothing walks,
+  slides or jumps through a wall, except the mouse during a turn of the SQUEEZE consumable.
 - **Chasms** (`main.gd` `_place_chasms`, `board.chasms`): runs of cells a cell wide that can turn
   corners, never on the mouse, cheese or a trap and never touching another chasm. Like a gap, nothing
   can move onto a chasm cell but jumps pass over it, so LEAP crosses one. A chasm that would cut a
@@ -99,7 +106,8 @@ then growing every few rounds to its max, which the later ones reach in endless 
 path length around the walls and traps (`Board.distances_from`) with a few spare turns that shrink
 over the run.
 
-A round may have a **chest** (`main.gd` `CHEST_CHANCE`, `_place_chests`), opened by walking or
+A round may have a **chest** (`main.gd` `CHEST_CHANCE`), in a pocket of wall once the round has
+walls (`_place_pocket`) or out in the open before then (`_place_chest`), opened by walking or
 sliding over it like a crumb. It pays `CHEST_CRUMBS` (12) (`_open_chest`).
 
 Card slots (`Run.slots`, up to 8, never more than cards in hand) and cards in hand (`Run.hand_size`,
@@ -183,7 +191,7 @@ pays `Boss.WIN_CRUMBS`, adds a card slot and a card in hand, and offers a free t
   lands and `distances_from` is a BFS around walls and traps (turn limit, SNIFF, the Alley King,
   wall generation, the sim bot). Crumbs emit `crumb_collected`, chests `chest_opened`, keys
   `key_collected`, and a door a key opens `door_unlocked`. `clear_layout` empties the floor tiles,
-  chasms, doors, keys, switches, pylons and flamethrowers before a round is laid out. `move_cats()`
+  chasms, doors, keys, switches, chests, pylons and flamethrowers before a round is laid out. `move_cats()`
   walks the cats at the end of a turn, `move_cheese()` runs the cheese for RUNAWAY CHEESE;
   `is_deadly(cell)` says whether moving onto a cell is fatal, and `in_blast(cell)` whether ending
   this turn there is.

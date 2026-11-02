@@ -372,9 +372,10 @@ func hazard_at(cell: Vector2i) -> Hazard:
 	return null
 
 
-## Takes the floor tiles, chasms, bridges, doors, gates, keys, plates, crates, pylons and flamethrowers
-## off the board, for laying out a new round.
+## Takes the floor tiles, chasms, bridges, doors, gates, keys, plates, crates, chests, pylons and
+## flamethrowers off the board, for laying out a new round.
 func clear_layout() -> void:
+	chests = []
 	glue = []
 	conveyors = {}
 	holes = []
@@ -392,9 +393,9 @@ func clear_layout() -> void:
 	keys_held = 0
 
 
-## True when the cell has a key, a pressure plate or a crate.
+## True when the cell has a key, a pressure plate, a crate or a chest.
 func has_item(cell: Vector2i) -> bool:
-	return cell in keys or cell in plates or cell in crates
+	return cell in keys or cell in plates or cell in crates or cell in chests
 
 
 ## Takes any glue pad, conveyor, mouse hole, floorboard, gap, jump pad, chasm, bridge, shock pylon or
@@ -466,17 +467,32 @@ func step_target(cell: Vector2i, dir: Card.Dir) -> Vector2i:
 ## Steps from start to each cell it can reach, going around walls (or through them, with
 ## through_walls) and traps. Cells it can't reach are left out.
 func distances_from(start: Vector2i, through_walls := false) -> Dictionary[Vector2i, int]:
+	# _can_step, inlined: laying out a round runs this a few hundred times.
+	var closed: Dictionary[Vector2i, bool] = {}
+	for cells: Array[Vector2i] in [traps, broken, chasms]:
+		for cell in cells:
+			closed[cell] = true
+	for hazard in hazards:
+		closed[hazard.cell] = true
+	var offsets: Array = Card.OFFSETS.values()
 	var distances: Dictionary[Vector2i, int] = {start: 0}
 	var queue: Array[Vector2i] = [start]
 	var i := 0
 	while i < queue.size():
 		var cell := queue[i]
 		i += 1
-		for offset: Vector2i in Card.OFFSETS.values():
+		var steps := distances[cell] + 1
+		for offset: Vector2i in offsets:
 			var next := cell + offset
-			if not distances.has(next) and _can_step(cell, next, through_walls) and next not in traps:
-				distances[next] = distances[cell] + 1
-				queue.append(next)
+			if next.x < 0 or next.y < 0 or next.x >= grid or next.y >= grid or distances.has(next) \
+					or closed.has(next):
+				continue
+			if not through_walls:
+				var edge := Vector3i(mini(cell.x, next.x), mini(cell.y, next.y), 0 if cell.y == next.y else 1)
+				if walls.has(edge) or doors.has(edge) or gates.has(edge) and not is_pressed(gates[edge]):
+					continue
+			distances[next] = steps
+			queue.append(next)
 	return distances
 
 

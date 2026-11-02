@@ -15,11 +15,27 @@ const SLOT_GAP := 8
 const MIN_CHEESE_DISTANCE := 8
 ## Crumbs scattered on the board each round, worth 1 each.
 const CRUMB_COUNT := 6
-## Each run of wall is this many wall segments long, end to end along cell edges, turning a corner at
-## each one with WALL_TURN_CHANCE.
-const WALL_RUN_MIN := 2
-const WALL_RUN_MAX := 5
-const WALL_TURN_CHANCE := 0.35
+## Each run of wall is WALL_RUN_MIN wall segments long, up to WALL_SPAN of the board's side, end to end
+## along cell edges. It turns a corner at most once, at each segment with WALL_TURN_CHANCE.
+const WALL_RUN_MIN := 3
+const WALL_SPAN := 0.6
+const WALL_TURN_CHANCE := 0.25
+## Runs of wall tried for each one laid, and for the chest's pocket (see _place_walls, _place_pocket).
+## The one that does most is kept.
+const WALL_TRIES := 16
+const POCKET_TRIES := 40
+## A run of wall that doesn't lengthen the way to the cheese is only laid if it lengthens the way to
+## at least this share of the board's cells.
+const WALL_MIN_REACH := 0.2
+## The walls lengthen the way from the mouse to the cheese by at most this share of the board's side.
+const WALL_DETOUR := 0.3
+## The chest goes in a pocket: a dead end that takes CHEST_MIN_DETOUR to CHEST_MAX_DETOUR more steps to
+## go by on the way to the cheese (see _pockets). Pockets the chest isn't in get a crumb.
+const CHEST_MIN_DETOUR := 3
+const CHEST_MAX_DETOUR := 8
+## Cells deep a pocket of wall made for the chest is (see _wall_run).
+const POCKET_DEPTH_MIN := 2
+const POCKET_DEPTH_MAX := 3
 ## Each chasm is a line of this many cells, a cell wide, turning a corner at each cell with
 ## CHASM_TURN_CHANCE. A chasm that could do without a bridge still gets one with BRIDGE_CHANCE.
 const CHASM_MIN := 3
@@ -37,6 +53,8 @@ const FLAME_MIN := 2
 ## Runs of wall tried for each locked door or gate (see _place_locks). The one that makes the way to the
 ## cheese longest while shut is kept.
 const LOCK_TRIES := 40
+## The most wall segments in a run with a locked door or gate in it.
+const LOCK_RUN_MAX := 5
 ## Random cells tried for each key, plate and crate. The one closest to the way there is kept.
 const ITEM_TRIES := 30
 ## A crate starts this many cells in a straight line from its plate.
@@ -137,6 +155,8 @@ var _preview_board := Board.new()
 var _preview_queued := false
 ## Cells kept clear while laying out a round: the lines crates get pushed along to their plates.
 var _crate_lanes: Array[Vector2i] = []
+## Most steps from the mouse to the cheese the walls may make it while laying out a round (see _place_walls).
+var _longest_way := 0
 ## Shows the keys the mouse holds, next to the HUD, in rounds that have doors or keys.
 var _key_label := Label.new()
 ## Shows the round's score and target, and this turn's points and mult while it plays, before the trinkets.
@@ -265,7 +285,13 @@ func new_round() -> void:
 	while _distance(mouse, cheese) < mini(MIN_CHEESE_DISTANCE, board.grid - 2):
 		cheese = _random_cell()
 	var traps := _place_traps(mouse, cheese)
-	var walls := _place_walls(mouse, traps)
+	var walls := _place_walls(mouse, cheese, traps)
+	# A chest goes in a pocket of wall, once the round has walls. Laid now, so the rest keeps off it.
+	var chest := randf() < CHEST_CHANCE
+	if chest and Difficulty.walls(run.round_number) > 0:
+		var pocket := _place_pocket(mouse, cheese, traps)
+		if pocket != NO_CELL:
+			board.chests.append(pocket)
 	_place_chasms(mouse, cheese, traps)
 	_place_locks(mouse, cheese, traps)
 	_place_hazards(mouse, cheese, traps)
@@ -273,7 +299,8 @@ func new_round() -> void:
 	var crumbs := _place_crumbs(mouse, cheese, traps)
 	var cats := _place_cats(mouse, cheese, traps)
 	board.place(mouse, cheese, traps, crumbs, cats, run.boss == Boss.Kind.ALLEY_KING, walls)
-	board.chests = _place_chests(mouse, cheese, traps, crumbs)
+	if chest and board.chests.is_empty():
+		board.chests = _place_chest(mouse, cheese, traps, crumbs)
 	turn_limit = _turn_limit(_path_distance(mouse, cheese))
 	BugReport.note("Round %d%s: %dx%d board, %d turns, mouse %s, cheese %s, traps %s, crumbs %s, chests %s" % [
 		run.round_number, " (boss %s)" % Boss.INFO[run.boss][0] if run.boss != -1 else "", board.grid,
@@ -1227,7 +1254,9 @@ func _clear_cards() -> void:
 func _refresh_hud() -> void:
 	var round_text := "Endless round %d" % run.round_number if run.endless or run.round_number > Run.GOAL_ROUNDS \
 		else "Round %d of %d" % [run.round_number, Run.GOAL_ROUNDS]
-	hud_label.text = "%s · Turn %d of %d · %d crumbs" % [round_text, turn, turn_limit, run.crumbs]
+	# The label wraps to fit beside the title. Non-breaking spaces keep each part on one line.
+	var parts := PackedStringArray([round_text, "Turn %d of %d" % [turn, turn_limit], "%d crumbs" % run.crumbs])
+	hud_label.text = " · ".join(Array(parts).map(func(part: String) -> String: return part.replace(" ", " ")))
 	_key_label.visible = board.keys_held > 0 or not board.keys.is_empty() or not board.doors.is_empty()
 	_key_label.text = "· %d key%s" % [board.keys_held, "" if board.keys_held == 1 else "s"]
 	_score_label.text = "Score %d / %d" % [round_score, score_target]
@@ -1558,56 +1587,231 @@ func _place_traps(mouse: Vector2i, cheese: Vector2i) -> Array[Vector2i]:
 	return traps
 
 
-## Lays down Difficulty.walls() runs of wall, each a line of wall segments along cell edges that
-## sometimes turns a corner. A run that would cut any cell off from the mouse (with the traps' help)
-## is left out, so the cheese and every crumb can always be reached and no cat gets shut in.
-func _place_walls(mouse: Vector2i, traps: Array[Vector2i]) -> Dictionary[Vector3i, bool]:
+## Lays down Difficulty.walls() runs of wall (see _wall_run), each the one of WALL_TRIES that most
+## lengthens the way from the mouse to the cheese, then the way to the most cells. A run that does
+## neither, or lengthens the way to fewer than WALL_MIN_REACH of the cells, is left out, so every wall
+## is in the way of something. All together they lengthen the way to the cheese by at most WALL_DETOUR
+## of the board's side (_longest_way), so the board doesn't turn into a maze. A run is cut short rather
+## than cut any cell off from the mouse (with the traps' help), so the cheese and every crumb can always
+## be reached and no cat gets shut in.
+func _place_walls(mouse: Vector2i, cheese: Vector2i, traps: Array[Vector2i]) -> Dictionary[Vector3i, bool]:
 	# Built on the board so its pathfinding can check each run.
 	board.walls = {}
 	board.traps = traps
 	var open_cells := board.grid * board.grid - traps.size()
-	var runs := 0
-	for attempt in 200:
-		if runs == Difficulty.walls(run.round_number):
-			break
-		var added: Array[Vector3i] = []
-		for wall in _wall_run():
-			if not board.walls.has(wall):
-				board.walls[wall] = true
-				added.append(wall)
-		if not added.is_empty() and board.distances_from(mouse).size() == open_cells:
-			runs += 1
-		else:
-			for wall in added:
+	_longest_way = board.distances_from(mouse)[cheese] + ceili(board.grid * WALL_DETOUR)
+	for i in Difficulty.walls(run.round_number):
+		var before := board.distances_from(mouse)
+		var best: Array[Vector3i] = []
+		var best_score := 0.0
+		for attempt in WALL_TRIES:
+			var walls := _wall_run()
+			var after := _lay_run(walls, mouse, open_cells)
+			for wall in walls:
 				board.walls.erase(wall)
+			if after.is_empty() or after[cheese] > _longest_way:
+				continue
+			var longer := 0
+			for cell in after:
+				if after[cell] > before[cell]:
+					longer += 1
+			var gain: int = after[cheese] - before[cheese]
+			if gain == 0 and longer < open_cells * WALL_MIN_REACH:
+				continue
+			var score := gain + longer / float(open_cells)
+			if score > best_score:
+				best = walls
+				best_score = score
+		for wall in best:
+			board.walls[wall] = true
 	return board.walls
 
 
-## A random run of wall: a walk along the grid lines between cells, from a corner inside the board,
-## that ends early rather than run along the board's edge. Empty if that leaves it shorter than
-## WALL_RUN_MIN.
-func _wall_run() -> Array[Vector3i]:
+## Finds a pocket to hide the chest in (see _pockets), the one farthest off the way to the cheese. The
+## walls laid so far may have made one. If not, tries POCKET_TRIES U-shaped runs of wall (see _wall_run)
+## that keep the way to the cheese within _longest_way, and lays the one that makes the farthest pocket.
+## Returns the pocket's cell, or NO_CELL with nothing laid when no run makes one.
+func _place_pocket(mouse: Vector2i, cheese: Vector2i, traps: Array[Vector2i]) -> Vector2i:
+	var pockets := _pockets(board.distances_from(mouse), mouse, cheese)
+	if not pockets.is_empty():
+		return _farthest(pockets)
+	var open_cells := board.grid * board.grid - traps.size()
+	var best: Array[Vector3i] = []
+	var best_cell := NO_CELL
+	var best_detour := 0
+	for attempt in POCKET_TRIES:
+		var walls := _wall_run(true)
+		var from_mouse := _lay_run(walls, mouse, open_cells)
+		if not from_mouse.is_empty() and from_mouse[cheese] <= _longest_way:
+			pockets = _pockets(from_mouse, mouse, cheese)
+		else:
+			pockets.clear()
+		for wall in walls:
+			board.walls.erase(wall)
+		if pockets.is_empty():
+			continue
+		var cell := _farthest(pockets)
+		if pockets[cell] > best_detour:
+			best = walls
+			best_cell = cell
+			best_detour = pockets[cell]
+	for wall in best:
+		board.walls[wall] = true
+	return best_cell
+
+
+## Pockets: dead ends (see _dead_end) at least CHEST_MIN_DISTANCE from the mouse that make going by them
+## on the way to the cheese take CHEST_MIN_DETOUR to CHEST_MAX_DETOUR more steps, given the steps from
+## the mouse to each cell. Maps each to those steps.
+func _pockets(from_mouse: Dictionary[Vector2i, int], mouse: Vector2i, cheese: Vector2i) -> Dictionary[Vector2i, int]:
+	var from_cheese := board.distances_from(cheese)
+	var spacing := mini(CHEST_MIN_DISTANCE, board.grid - 2)
+	var pockets: Dictionary[Vector2i, int] = {}
+	for cell in from_mouse:
+		var detour: int = from_mouse[cell] + from_cheese.get(cell, CHEST_MAX_DETOUR) - from_mouse[cheese]
+		if detour >= CHEST_MIN_DETOUR and detour <= CHEST_MAX_DETOUR and cell != cheese \
+				and _distance(cell, mouse) >= spacing and _dead_end(cell):
+			pockets[cell] = detour
+	return pockets
+
+
+## The pocket off pockets (see _pockets) with the most steps.
+func _farthest(pockets: Dictionary[Vector2i, int]) -> Vector2i:
+	var best := NO_CELL
+	for cell in pockets:
+		if best == NO_CELL or pockets[cell] > pockets[best]:
+			best = cell
+	return best
+
+
+## True when there's only one way onto the cell: walls, the board's edge, traps and the like close off
+## the other three sides.
+func _dead_end(cell: Vector2i) -> bool:
+	var ways := 0
+	for offset: Vector2i in Card.OFFSETS.values():
+		if board._can_step(cell, cell + offset) and cell + offset not in board.traps:
+			ways += 1
+	return ways == 1
+
+
+## Lays the run of walls on the board, dropping walls off its end while it cuts any cell off from the
+## mouse, down to WALL_RUN_MIN. Returns the steps from the mouse to each cell with what's left of the
+## run laid, and leaves that laid, or returns nothing and lays nothing when no part of it fits.
+func _lay_run(walls: Array[Vector3i], mouse: Vector2i, open_cells: int) -> Dictionary[Vector2i, int]:
+	for wall in walls:
+		board.walls[wall] = true
+	while walls.size() >= WALL_RUN_MIN:
+		var distances := board.distances_from(mouse)
+		if distances.size() == open_cells:
+			return distances
+		board.walls.erase(walls.pop_back())
+	for wall in walls:
+		board.walls.erase(wall)
+	walls.clear()
+	var none: Dictionary[Vector2i, int] = {}
+	return none
+
+
+## A random run of wall: a walk along the grid lines between cells, WALL_RUN_MIN to WALL_SPAN of the
+## board's side long (or to longest, if set), that turns a corner at most once. With pocket, it's a U
+## instead: POCKET_DEPTH along, one across, and back, around a dead end a cell wide. It starts on the
+## board's edge heading in, at the loose end of a wall, door or gate, or anywhere inside, and stops on
+## reaching the edge or another wall, so walls join up rather than cross. Empty if that leaves it
+## shorter than WALL_RUN_MIN.
+func _wall_run(pocket := false, longest := 0) -> Array[Vector3i]:
 	var walls: Array[Vector3i] = []
+	var size := board.grid
 	# Points are cell corners: (x, y) is the top-left corner of cell (x, y).
-	var point := Vector2i(randi_range(1, board.grid - 1), randi_range(1, board.grid - 1))
-	var dir: Card.Dir = Card.Dir.values().pick_random()
-	for i in randi_range(WALL_RUN_MIN, WALL_RUN_MAX):
-		if i > 0 and randf() < WALL_TURN_CHANCE:
-			var offset: Vector2i = Card.OFFSETS[dir]
-			dir = Card.OFFSETS.find_key(Vector2i(offset.y, offset.x) * [1, -1].pick_random()) as Card.Dir
-		var next: Vector2i = point + Card.OFFSETS[dir]
-		var low := Vector2i(mini(point.x, next.x), mini(point.y, next.y))
-		var horizontal := point.y == next.y
-		# A horizontal edge is the top of the cell to its lower right, a vertical one its left.
-		if horizontal and (low.y <= 0 or low.y >= board.grid or low.x < 0 or low.x >= board.grid):
+	var point := Vector2i(randi_range(1, size - 1), randi_range(1, size - 1))
+	var offset: Vector2i = Card.OFFSETS.values().pick_random()
+	var ends := _wall_ends()
+	var start := randf()
+	if start < 0.5:
+		# On the edge the run heads away from.
+		if offset.x != 0:
+			point.x = 0 if offset.x > 0 else size
+		else:
+			point.y = 0 if offset.y > 0 else size
+	elif start < 0.75 and not ends.is_empty():
+		point = ends.pick_random()
+	# Which way each wall goes from the last: a quarter turn one way or the other.
+	var turn: int = [1, -1].pick_random()
+	var offsets: Array[Vector2i] = []
+	if pocket:
+		var depth := randi_range(POCKET_DEPTH_MIN, POCKET_DEPTH_MAX)
+		for leg: int in [depth, 1, depth]:
+			for i in leg:
+				offsets.append(offset)
+			offset = Vector2i(-offset.y, offset.x) * turn
+	else:
+		var turned := false
+		if longest == 0:
+			longest = roundi(size * WALL_SPAN)
+		for i in randi_range(WALL_RUN_MIN, maxi(longest, WALL_RUN_MIN)):
+			if i > 0 and not turned and randf() < WALL_TURN_CHANCE:
+				offset = Vector2i(-offset.y, offset.x) * turn
+				turned = true
+			offsets.append(offset)
+	for step in offsets:
+		offset = step
+		var edge := _grid_line(point, point + offset)
+		if edge == NO_EDGE or _is_wall(edge):
 			break
-		if not horizontal and (low.x <= 0 or low.x >= board.grid or low.y < 0 or low.y >= board.grid):
+		walls.append(edge)
+		point += offset
+		if _on_rim(point) or _touches_wall(point):
 			break
-		walls.append(Vector3i(low.x, low.y - 1, 1) if horizontal else Vector3i(low.x - 1, low.y, 0))
-		point = next
 	if walls.size() < WALL_RUN_MIN:
 		walls.clear()
 	return walls
+
+
+## The edge key for the stretch of grid line between two neighboring cell corners, or NO_EDGE when it
+## runs along the board's edge or off the board.
+func _grid_line(a: Vector2i, b: Vector2i) -> Vector3i:
+	var low := Vector2i(mini(a.x, b.x), mini(a.y, b.y))
+	# A horizontal edge is the top of the cell to its lower right, a vertical one its left.
+	if a.y == b.y:
+		if low.y <= 0 or low.y >= board.grid or low.x < 0 or low.x >= board.grid:
+			return NO_EDGE
+		return Vector3i(low.x, low.y - 1, 1)
+	if low.x <= 0 or low.x >= board.grid or low.y < 0 or low.y >= board.grid:
+		return NO_EDGE
+	return Vector3i(low.x - 1, low.y, 0)
+
+
+## True when a wall, a locked door or a gate is on the edge.
+func _is_wall(edge: Vector3i) -> bool:
+	return board.walls.has(edge) or board.doors.has(edge) or board.gates.has(edge)
+
+
+func _on_rim(point: Vector2i) -> bool:
+	return point.x == 0 or point.y == 0 or point.x == board.grid or point.y == board.grid
+
+
+## True when a wall, a locked door or a gate meets the cell corner.
+func _touches_wall(point: Vector2i) -> bool:
+	for offset: Vector2i in Card.OFFSETS.values():
+		var edge := _grid_line(point, point + offset)
+		if edge != NO_EDGE and _is_wall(edge):
+			return true
+	return false
+
+
+## Cell corners inside the board where a wall, a locked door or a gate ends without meeting another.
+func _wall_ends() -> Array[Vector2i]:
+	var meeting: Dictionary[Vector2i, int] = {}
+	for edges: Dictionary in [board.walls, board.doors, board.gates]:
+		for edge: Vector3i in edges:
+			# Below cell (x, y) runs from its lower left corner, right of it from its upper right.
+			var first := Vector2i(edge.x, edge.y + 1) if edge.z == 1 else Vector2i(edge.x + 1, edge.y)
+			for point: Vector2i in [first, Vector2i(edge.x + 1, edge.y + 1)]:
+				meeting[point] = meeting.get(point, 0) + 1
+	var ends: Array[Vector2i] = []
+	for point in meeting:
+		if meeting[point] == 1 and not _on_rim(point):
+			ends.append(point)
+	return ends
 
 
 ## Lays down Difficulty.chasms() chasms (see _chasm_run), off the mouse, the cheese and the traps. A
@@ -1644,7 +1848,8 @@ func _place_chasms(mouse: Vector2i, cheese: Vector2i, traps: Array[Vector2i]) ->
 
 
 ## A random chasm: a walk of CHASM_MIN to CHASM_MAX cells from a random one, sometimes turning a
-## corner, that stops short of the board's edge, the mouse, the cheese, a trap or another chasm. It
+## corner, that stops short of the board's edge, the mouse, the cheese, a trap, the chest or another
+## chasm. It
 ## stays a cell wide: no cell in it touches another chasm cell (even one of its own) but the ones
 ## before and after it. Empty if that leaves it shorter than CHASM_MIN.
 func _chasm_run(mouse: Vector2i, cheese: Vector2i, traps: Array[Vector2i]) -> Array[Vector2i]:
@@ -1657,7 +1862,7 @@ func _chasm_run(mouse: Vector2i, cheese: Vector2i, traps: Array[Vector2i]) -> Ar
 				var offset: Vector2i = Card.OFFSETS[dir]
 				dir = Card.OFFSETS.find_key(Vector2i(offset.y, offset.x) * [1, -1].pick_random()) as Card.Dir
 			cell += Card.OFFSETS[dir]
-		if not board._in_bounds(cell) or cell == mouse or cell == cheese or cell in traps:
+		if not board._in_bounds(cell) or cell == mouse or cell == cheese or cell in traps or cell in board.chests:
 			break
 		var touches := false
 		for offset: Vector2i in Card.OFFSETS.values():
@@ -1750,7 +1955,7 @@ func _lock_run(mouse: Vector2i, cheese: Vector2i, open_cells: int) -> Vector3i:
 	var best_lock := NO_EDGE
 	var best_gain := -1
 	for attempt in LOCK_TRIES:
-		var walls := _wall_run()
+		var walls := _wall_run(false, LOCK_RUN_MAX)
 		if walls.is_empty() or walls.any(func(wall: Vector3i) -> bool:
 				return board.walls.has(wall) or board.doors.has(wall) or board.gates.has(wall)):
 			continue
@@ -1914,9 +2119,14 @@ func _place_floor(mouse: Vector2i, cheese: Vector2i, traps: Array[Vector2i]) -> 
 
 
 ## Picks crumb cells off the mouse, the cheese, the traps, the floor tiles (see _place_floor), the
-## keys, plates, crates and crate lanes (see _place_locks) and each other.
+## keys, plates, crates, chests and crate lanes (see _place_locks) and each other. Pockets the walls
+## made (see _pockets) get theirs first, so a dead end always has something in it.
 func _place_crumbs(mouse: Vector2i, cheese: Vector2i, traps: Array[Vector2i]) -> Array[Vector2i]:
 	var crumbs: Array[Vector2i] = []
+	for cell in _pockets(board.distances_from(mouse), mouse, cheese):
+		if crumbs.size() < CRUMB_COUNT and not board.has_tile(cell) and not board.has_item(cell) \
+				and cell not in _crate_lanes:
+			crumbs.append(cell)
 	for attempt in 1000:
 		if crumbs.size() == CRUMB_COUNT:
 			break
@@ -1927,13 +2137,12 @@ func _place_crumbs(mouse: Vector2i, cheese: Vector2i, traps: Array[Vector2i]) ->
 	return crumbs
 
 
-## With CHEST_CHANCE, picks a cell for a chest at least CHEST_MIN_DISTANCE from the mouse, and off the
-## cheese, the traps, the floor tiles, the keys, plates, crates and crate lanes, and the crumbs.
-func _place_chests(mouse: Vector2i, cheese: Vector2i, traps: Array[Vector2i],
+## Picks a cell for a chest out in the open, for a round with no walls to make a pocket of (see
+## _place_pocket): at least CHEST_MIN_DISTANCE from the mouse, and off the cheese, the traps, the floor
+## tiles, the keys, plates, crates and crate lanes, and the crumbs.
+func _place_chest(mouse: Vector2i, cheese: Vector2i, traps: Array[Vector2i],
 		crumbs: Array[Vector2i]) -> Array[Vector2i]:
 	var chests: Array[Vector2i] = []
-	if randf() >= CHEST_CHANCE:
-		return chests
 	var spacing := mini(CHEST_MIN_DISTANCE, board.grid - 2)
 	for attempt in 1000:
 		var cell := _random_cell()
