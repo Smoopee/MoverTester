@@ -13,6 +13,8 @@ const OFFER_SIZE := Vector2(200, 112)
 const SECTION_COLUMNS := 2
 const PICKER_COLUMNS := 6
 const ICON_SIZE := 22
+## Height of a Buy button on a touchscreen, sized for a finger.
+const TOUCH_BUTTON_HEIGHT := 40
 
 
 ## One thing for sale this visit.
@@ -236,11 +238,32 @@ func _make_tile(offer: Offer) -> Control:
 	description.add_theme_font_size_override("font_size", 13)
 	vbox.add_child(description)
 	offer.button = Button.new()
+	# The default button is dark grey, which disappears into the tile on a phone screen.
+	var color: Color = info[3]
+	offer.button.add_theme_stylebox_override("normal", _button_style(color.darkened(0.45), color))
+	offer.button.add_theme_stylebox_override("hover", _button_style(color.darkened(0.3), color.lightened(0.3)))
+	offer.button.add_theme_stylebox_override("pressed", _button_style(color.darkened(0.6), color))
+	offer.button.add_theme_stylebox_override("disabled", _button_style(Color(0, 0, 0, 0.2), Color(color, 0.3)))
+	for state in ["font_color", "font_hover_color", "font_pressed_color"]:
+		offer.button.add_theme_color_override(state, Color("f4ecd8"))
+	offer.button.add_theme_color_override("font_disabled_color", Color(1, 1, 1, 0.4))
+	if DisplayServer.is_touchscreen_available():
+		offer.button.custom_minimum_size.y = TOUCH_BUTTON_HEIGHT
 	offer.button.focus_mode = Control.FOCUS_NONE
 	offer.button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	offer.button.pressed.connect(_buy.bind(offer))
 	vbox.add_child(offer.button)
 	return tile
+
+
+func _button_style(bg: Color, border: Color) -> StyleBoxFlat:
+	var style := StyleBoxFlat.new()
+	style.bg_color = bg
+	style.border_color = border
+	style.set_border_width_all(2)
+	style.set_corner_radius_all(6)
+	style.set_content_margin_all(6)
+	return style
 
 
 ## Name, description, price and color of an offer.

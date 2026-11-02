@@ -9,6 +9,9 @@ discard area under the hand (lit while a card is dragged), to swap it for a new 
 
 **Touch** (Android playtests): `DisplayServer.is_touchscreen_available()` turns on the hold-to-discard and
 puts Bug and Dev buttons after the trinkets (`main.gd` `_add_touch_button`) in place of F12 and F2.
+It also swaps Godot's tooltips, which have no hover to go by, for `TouchTips` (`scripts/touch_tips.gd`):
+resting a finger on anything with a tooltip shows it above the finger until it lifts, and a hold that
+showed a tip doesn't press the button under it. A card's tip shows as its hold-to-discard starts filling.
 Desktop play is unchanged. To try it on a PC, set `Input.emulate_touch_from_mouse`. Bug reports from a
 phone save to `user://bug_reports`.
 
@@ -155,6 +158,7 @@ pays `Boss.WIN_CRUMBS`, adds a card slot and a card in hand, and offers a free t
   skill does something.
 - `scripts/shop.gd` — `Shop`: overlay after a won round. Rolls offers, sells them, and picks the card
   for a stamp.
+- `scripts/touch_tips.gd` — `TouchTips`: hold-to-show tooltips on a touchscreen (see Touch above).
 - `scripts/pile_button.gd` — `PileButton`: the draw and discard piles either side of the hand, drawn
   as a card stack with a count (card back / skull). The discard pile also takes dropped cards.
 - `scripts/pile_viewer.gd` — `PileViewer`: overlay opened from the pile buttons that lists a
