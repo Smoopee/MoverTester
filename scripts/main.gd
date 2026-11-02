@@ -111,6 +111,8 @@ var turn_points := 0
 var turn_mult := 1
 ## What the last turn added to the score, for the HUD.
 var last_turn_score := ""
+## Points made this frame, by the cell that made them, waiting to pop up together (_pop_points).
+var _pending_points: Dictionary[Vector2i, int] = {}
 ## What each chest opened this round gave, for the win panel.
 var chest_rewards := PackedStringArray()
 ## Shown in place of the hint at the start of the next turn, after a chest is opened.
@@ -623,18 +625,19 @@ func _short_of_boss_target() -> bool:
 func _on_mouse_moved(motion: Board.Motion, cells: int) -> void:
 	match motion:
 		Board.Motion.STEP, Board.Motion.JUMP:
-			turn_points += cells * Score.CELL_POINTS
+			_add_points(cells * Score.CELL_POINTS, board.mouse_cell)
 		Board.Motion.SLIDE:
-			turn_points += cells * Score.CELL_POINTS
-			if run.has(Items.Trinket.BUTTER_PAWS):
-				turn_points += cells * Score.BUTTER_PAWS_POINTS
+			var butter := Score.BUTTER_PAWS_POINTS if run.has(Items.Trinket.BUTTER_PAWS) else 0
+			_add_points(cells * (Score.CELL_POINTS + butter), board.mouse_cell)
 		Board.Motion.RIDE:
-			turn_points += Score.RIDE_POINTS
+			_add_points(Score.RIDE_POINTS, board.mouse_cell)
 			if run.has(Items.Trinket.JOYRIDE):
 				turn_mult += Score.JOYRIDE_MULT
+				_pop_mult("+%d mult" % Score.JOYRIDE_MULT)
 		Board.Motion.BUMP:
 			if run.has(Items.Trinket.HARD_HEAD):
 				turn_mult += Score.HARD_HEAD_MULT
+				_pop_mult("+%d mult" % Score.HARD_HEAD_MULT)
 	_refresh_hud()
 
 
@@ -649,10 +652,13 @@ func _score_cards(played: Array[CardSlot]) -> void:
 			if card:
 				effects += int(slot.effect != CardSlot.Effect.NONE) + int(card.stamp != CardSlot.Effect.NONE)
 		turn_mult += effects * Score.SHOW_OFF_MULT
+		if effects > 0:
+			_pop_mult("+%d mult" % (effects * Score.SHOW_OFF_MULT))
 	if run.has(Items.Trinket.DAREDEVIL) and not _round_over():
 		for offset: Vector2i in Card.OFFSETS.values():
 			if board.is_deadly(board.mouse_cell + offset):
 				turn_mult *= Score.DAREDEVIL_TIMES
+				_pop_mult("×%d mult" % Score.DAREDEVIL_TIMES)
 				BugReport.note("  DAREDEVIL: next to danger at %s" % (board.mouse_cell + offset))
 				break
 	_refresh_hud()
@@ -665,11 +671,51 @@ func _bank_turn() -> void:
 		turn_mult += (turn_limit - turn) * Score.SPARE_TURN_MULT
 	var gained := turn_points * turn_mult
 	round_score += gained
+	if gained > 0:
+		pop_turn_score(gained, turn_points, turn_mult)
 	last_turn_score = "+%d (%d × %d)" % [gained, turn_points, turn_mult]
 	BugReport.note("Turn score %d x %d = %d, round score %d / %d" % [turn_points, turn_mult, gained,
 		round_score, score_target])
 	turn_points = 0
 	turn_mult = 1
+
+
+## Adds points a move made on cell to the turn, and pops them up there. Points made on a cell in the
+## same frame (a step onto a crumb) pop up as one number.
+func _add_points(points: int, cell: Vector2i) -> void:
+	turn_points += points
+	if points <= 0 or not board.animate:
+		return
+	if _pending_points.is_empty():
+		_pop_points.call_deferred()
+	_pending_points[cell] = _pending_points.get(cell, 0) + points
+
+
+func _pop_points() -> void:
+	for cell: Vector2i in _pending_points:
+		var points := _pending_points[cell]
+		ScorePopup.spawn(self, board.cell_global_center(cell), "+%d" % points, ScorePopup.points_intensity(points))
+	_pending_points.clear()
+
+
+## Pops up mult a trinket added this turn, over the mouse.
+func _pop_mult(text: String) -> void:
+	if board.animate:
+		ScorePopup.spawn(self, board.cell_global_center(board.mouse_cell) + Vector2(0, -18), text, 0.45,
+			false, true)
+
+
+## Pops up the score a turn banked over the board, bigger and wilder the bigger a share of the round's
+## target it is, and flashes the score in the HUD. The dev menu calls it to try out sizes.
+func pop_turn_score(gained: int, points: int, mult: int) -> void:
+	if not board.animate:
+		return
+	var strength := ScorePopup.turn_intensity(gained, score_target)
+	ScorePopup.spawn(self, board.get_global_rect().get_center(), "+%d" % gained, strength, true, false,
+		"%d × %d" % [points, mult] if mult > 1 else "")
+	var flash := create_tween()
+	flash.tween_property(_score_label, "modulate", Color.WHITE, 0.3 + 0.5 * strength) \
+		.from(Color.WHITE.lerp(Color(2.2, 2.2, 1.6), 0.4 + 0.6 * strength))
 
 
 ## If the mouse is on a trap and THICK FUR hasn't been used this round, breaks the trap and returns
@@ -806,7 +852,7 @@ func _hand_size() -> int:
 ## Pays CHEST_CRUMBS.
 func _open_chest(cell: Vector2i) -> void:
 	run.crumbs += CHEST_CRUMBS
-	turn_points += Score.CHEST_POINTS
+	_add_points(Score.CHEST_POINTS, cell)
 	var text := "+%d" % CHEST_CRUMBS
 	chest_note = "Chest! %d crumbs." % CHEST_CRUMBS
 	_refresh_hud()
@@ -1080,7 +1126,7 @@ func _on_crumb_collected(cell: Vector2i) -> void:
 	var worth := 1 + (HARVEST_CRUMBS if run.has(Items.Trinket.BOUNTIFUL_HARVEST) else 0)
 	run.crumbs += worth
 	round_crumbs += worth
-	turn_points += Score.CRUMB_POINTS
+	_add_points(Score.CRUMB_POINTS, cell)
 	BugReport.note("  Picked up a crumb at %s (+%d)" % [cell, worth])
 	if run.has_skill(Items.Skill.EFFICIENT):
 		discards_left += 1
