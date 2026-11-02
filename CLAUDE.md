@@ -96,7 +96,10 @@ or a cat catches the mouse (or a pylon or flamethrower), or the turns run out, o
 crumbs picked up on the board), then opens the **shop**. It sells trinkets (passive for the run),
 skills, consumables (held in the pouch, used once) and card stamps (a slot effect stuck on one card). A
 stamped card plays its slot's effect first, then its stamp (`main.gd` `_play`): a BURN slot with a
-SLIDE stamp moves 3 cells, then slides. A burned card stays burned whatever its stamp.
+SLIDE stamp moves 3 cells, then slides. A burned card stays burned whatever its stamp. Some effects
+are stamps only, never rolled on a slot (`CardSlot.STAMP_ONLY`). Some are set by clicking the stamp
+band on a card in play (`Card.SET_STAMPS`, stored on the `CardData`), and STEADY makes the card ignore
+its slot: read a slot's effect on a card through `main.gd` `_slot_effect` / `_play_dir`.
 
 Each round also has a **score** (`scripts/score.gd` `Score`, `main.gd` `round_score`), kept apart from
 crumbs, which are money. Each turn adds up points (`Score.CELL_POINTS` a cell walked, slid or

@@ -396,7 +396,7 @@ func lock_in() -> void:
 		# The slot's effect and the card's stamp both apply. A burned card is gone, so nothing recycles it.
 		var effects: Array[CardSlot.Effect] = []
 		if slot:
-			effects = [slot.effect, card.stamp]
+			effects = [_slot_effect(slot, card), card.stamp]
 		if CardSlot.Effect.BURN in effects:
 			continue
 		if CardSlot.Effect.RECYCLE in effects:
@@ -434,9 +434,10 @@ func _play_cards(order: Array[CardSlot], preview := false) -> int:
 			i += 1
 			continue
 		var partner_slot: CardSlot = order[i + 1] if i + 1 < order.size() else null
-		var diagonal := slot.effect == CardSlot.Effect.DIAGONAL and partner_slot and partner_slot.get_card()
-		if preview and (slot.effect == CardSlot.Effect.GAMBLE
-				or diagonal and partner_slot.effect == CardSlot.Effect.GAMBLE):
+		var diagonal := _slot_effect(slot, card) == CardSlot.Effect.DIAGONAL and partner_slot \
+				and partner_slot.get_card()
+		if preview and (_slot_effect(slot, card) == CardSlot.Effect.GAMBLE
+				or diagonal and _slot_effect(partner_slot, partner_slot.get_card()) == CardSlot.Effect.GAMBLE):
 			break
 		i += 1
 		card.modulate = PLAYING
@@ -444,8 +445,8 @@ func _play_cards(order: Array[CardSlot], preview := false) -> int:
 			var partner := partner_slot.get_card()
 			i += 1
 			partner.modulate = PLAYING
-			var dir := slot.play_dir(card.dir)
-			var partner_dir := partner_slot.play_dir(partner.dir)
+			var dir := _play_dir(slot, card)
+			var partner_dir := _play_dir(partner_slot, partner)
 			var offset: Vector2i = Card.OFFSETS[dir] + Card.OFFSETS[partner_dir]
 			last_dir = partner_dir
 			ended = await board.jump(offset, dir)
@@ -641,16 +642,25 @@ func _on_mouse_moved(motion: Board.Motion, cells: int) -> void:
 	_refresh_hud()
 
 
-## Adds the mult of the score trinkets that go by how the cards played, the slots in played: SHOW-OFF
-## for each slot effect and stamp, and DAREDEVIL when they left the mouse next to a trap, a cat or a
-## cat's path.
+## Adds the mult that goes by how the cards played, the slots in played: SHINY stamps, SHOW-OFF for
+## each slot effect and stamp, and DAREDEVIL when they left the mouse next to a trap, a cat or a cat's
+## path.
 func _score_cards(played: Array[CardSlot]) -> void:
+	var shiny := 0
+	for slot in played:
+		var card := slot.get_card()
+		if card and card.stamp == CardSlot.Effect.SHINY:
+			shiny += 1
+	if shiny > 0:
+		turn_mult += shiny * Score.SHINY_MULT
+		_pop_mult("+%d mult" % (shiny * Score.SHINY_MULT))
 	if run.has(Items.Trinket.SHOW_OFF):
 		var effects := 0
 		for slot in played:
 			var card := slot.get_card()
 			if card:
-				effects += int(slot.effect != CardSlot.Effect.NONE) + int(card.stamp != CardSlot.Effect.NONE)
+				effects += int(_slot_effect(slot, card) != CardSlot.Effect.NONE) \
+					+ int(card.stamp != CardSlot.Effect.NONE)
 		turn_mult += effects * Score.SHOW_OFF_MULT
 		if effects > 0:
 			_pop_mult("+%d mult" % (effects * Score.SHOW_OFF_MULT))
@@ -732,16 +742,23 @@ func _survive_trap() -> bool:
 
 ## Moves the mouse for one card: its slot's effect plays first, then the card's stamp. When both
 ## move the mouse (a BURN slot and a SLIDE stamp), it makes both moves, in that order. When neither
-## does, it steps once. Returns true if the round is over.
+## does, it steps once. STRIDE steps as many cells as the card is set to. Returns true if the round
+## is over.
 func _play(slot: CardSlot, card: Card) -> bool:
-	var dir := slot.play_dir(card.dir)
+	var dir := _play_dir(slot, card)
 	var moved := false
-	for effect: CardSlot.Effect in [slot.effect, card.stamp]:
+	for effect: CardSlot.Effect in [_slot_effect(slot, card), card.stamp]:
 		match effect:
 			CardSlot.Effect.DOUBLE, CardSlot.Effect.GAMBLE, CardSlot.Effect.BURN, CardSlot.Effect.LEAP, \
 					CardSlot.Effect.SLIDE, CardSlot.Effect.WRAP:
 				moved = true
 				if await _move(effect, dir):
+					return true
+				if board.stuck:
+					return false
+			CardSlot.Effect.STRIDE:
+				moved = true
+				if await _steps(dir, card.data.stride):
 					return true
 				if board.stuck:
 					return false
@@ -878,12 +895,23 @@ func _boss_upgrade() -> PackedStringArray:
 	return lines
 
 
+## The slot's effect on the card in it (or none): no effect for a STEADY card, which plays as if
+## its slot were plain.
+func _slot_effect(slot: CardSlot, card: Card) -> CardSlot.Effect:
+	return CardSlot.Effect.NONE if card and card.stamp == CardSlot.Effect.STEADY else slot.effect
+
+
+## The direction the card in slot moves the mouse: its own for a STEADY card.
+func _play_dir(slot: CardSlot, card: Card) -> Card.Dir:
+	return card.dir if card.stamp == CardSlot.Effect.STEADY else slot.play_dir(card.dir)
+
+
 ## Slots in the order they play: left to right, with LAST slots moved to the end.
 func _play_order() -> Array[CardSlot]:
 	var order: Array[CardSlot] = []
 	var last: Array[CardSlot] = []
 	for slot in slots:
-		if slot.effect == CardSlot.Effect.LAST:
+		if _slot_effect(slot, slot.get_card()) == CardSlot.Effect.LAST:
 			last.append(slot)
 		else:
 			order.append(slot)
@@ -895,6 +923,8 @@ func _play_order() -> Array[CardSlot]:
 func _roll_effects() -> void:
 	var pool: Array = CardSlot.Effect.values()
 	pool.erase(CardSlot.Effect.NONE)
+	for effect in CardSlot.STAMP_ONLY:
+		pool.erase(effect)
 	if run.has(Items.Trinket.LUCKY_TAIL):
 		pool.erase(CardSlot.Effect.BLOCKED)
 	# Don't burn the deck down below a full hand.
@@ -1024,6 +1054,8 @@ func _make_card(data: CardData) -> Card:
 	var card := Card.new()
 	card.data = data
 	card.card_size = hand_card_size
+	card.set_on_click = true
+	card.stamp_set.connect(refresh_preview)
 	card.pressed.connect(_on_card_clicked.bind(card))
 	card.card_dropped_on.connect(_on_card_dropped_on_card.bind(card))
 	card.discard_requested.connect(discard_card.bind(card))

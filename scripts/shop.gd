@@ -276,7 +276,7 @@ func _info(offer: Offer) -> Array:
 		Kind.CONSUMABLE:
 			return Items.CONSUMABLES[offer.id] + [Items.CONSUMABLE_COLOR]
 	var effect: Array = CardSlot.INFO[offer.id]
-	return ["%s STAMP" % effect[0], effect[1], Items.STAMP_PRICE, effect[2]]
+	return ["%s STAMP" % effect[0], effect[1], Items.stamp_price(offer.id), effect[2]]
 
 
 func _icon(offer: Offer) -> ItemIcon:

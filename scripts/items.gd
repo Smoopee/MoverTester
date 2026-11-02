@@ -47,12 +47,20 @@ const SKILLS := {
 }
 ## Skills the player can hold at once.
 const SKILL_SLOTS := 4
-## Slot effects the shop can stamp onto a card. Only ones that work on a single card with no extra
-## input: direction effects would just make it another direction card.
+## Slot effects the shop can stamp onto a card. Only ones that work on a single card: direction
+## effects would just make it another direction card. Some are stamps only (CardSlot.STAMP_ONLY).
 const STAMPS: Array[CardSlot.Effect] = [
-	CardSlot.Effect.DOUBLE, CardSlot.Effect.LEAP, CardSlot.Effect.SLIDE, CardSlot.Effect.WRAP,
-	CardSlot.Effect.RECYCLE,
+	CardSlot.Effect.DOUBLE, CardSlot.Effect.LEAP, CardSlot.Effect.SLIDE, CardSlot.Effect.STRIDE,
+	CardSlot.Effect.SWIVEL, CardSlot.Effect.STEADY, CardSlot.Effect.SHINY, CardSlot.Effect.RECYCLE,
 ]
 const STAMP_PRICE := 6
+## Stamps that cost something other than STAMP_PRICE.
+const STAMP_PRICES := {
+	CardSlot.Effect.SWIVEL: 9,
+}
 ## Consumables the player can hold at once.
 const POUCH_SIZE := 3
+
+
+static func stamp_price(effect: CardSlot.Effect) -> int:
+	return STAMP_PRICES.get(effect, STAMP_PRICE)
