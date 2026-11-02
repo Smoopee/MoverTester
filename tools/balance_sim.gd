@@ -8,7 +8,8 @@ extends SceneTree
 ## plays every round as round N of a fresh run instead. Boss rounds are off unless --boss names one
 ## (alley_king, runaway_cheese, kitchen_light): then every round is that boss, each on a fresh run.
 ## --slots N and --hand N start every run with that many card slots and cards in hand (boss wins add more, but bosses are off by default).
-## --trinkets a,b starts every run with those trinkets (show_off, daredevil, ...), to see what they do to the score.
+## --trinkets a,b starts every run with those trinkets (butter_pat, ride_ticket, ...), and --skills a,b
+## with those skills (show_off, daredevil, ...), to see what they do to the score.
 
 const MAX_TURNS := 200
 
@@ -23,6 +24,8 @@ var slot_count := 0
 var hand_size := 0
 ## Items.Trinket values each run starts with.
 var trinkets: Array[int] = []
+## Items.Skill values each run starts with, at most Items.SKILL_SLOTS.
+var skills: Array[int] = []
 ## Rounds that had a chest, and chests opened.
 var chest_rounds := 0
 var chests_opened := 0
@@ -83,6 +86,18 @@ func _initialize() -> void:
 						quit(1)
 						return
 					trinkets.append(trinket)
+			"--skills":
+				for skill_name in args[i + 1].split(","):
+					var skill: int = Items.Skill.get(skill_name.to_upper(), -1)
+					if skill == -1:
+						printerr("Unknown skill %s, expected some of %s" % [skill_name, Items.Skill.keys()])
+						quit(1)
+						return
+					skills.append(skill)
+				if skills.size() > Items.SKILL_SLOTS:
+					printerr("At most %d skills" % Items.SKILL_SLOTS)
+					quit(1)
+					return
 	for effect in CardSlot.Effect.values():
 		effect_stats[effect] = [0, 0, 0, 0]
 	_run.call_deferred()
@@ -96,7 +111,8 @@ func _run() -> void:
 	board.animate = false
 	main.bosses_enabled = false
 	main.force_boss = boss
-	if boss != -1 or fixed_round > 0 or slot_count > 0 or hand_size > 0 or not trinkets.is_empty():
+	if boss != -1 or fixed_round > 0 or slot_count > 0 or hand_size > 0 or not trinkets.is_empty() \
+			or not skills.is_empty():
 		_new_run()
 	for r in rounds:
 		if r > 0:
@@ -115,8 +131,9 @@ func _run() -> void:
 ## Starts a run, skipping ahead to fixed_round if one is set.
 func _new_run() -> void:
 	main.new_run()
-	if not trinkets.is_empty():
+	if not trinkets.is_empty() or not skills.is_empty():
 		main.run.trinkets.assign(trinkets)
+		main.run.skills.assign(skills)
 		main.refresh_ui()
 	if fixed_round > 1:
 		main.run.round_number = fixed_round - 1

@@ -15,6 +15,9 @@ const PICKER_COLUMNS := 6
 const ICON_SIZE := 22
 ## Height of a Buy button on a touchscreen, sized for a finger.
 const TOUCH_BUTTON_HEIGHT := 40
+## The first reroll of the trinkets or skills costs this, and each one after it in the same visit
+## costs this much more. Trinket and skill rerolls share the count.
+const REROLL_PRICE := 5
 
 
 ## One thing for sale this visit.
@@ -33,6 +36,10 @@ var _offers: Array[Offer] = []
 var _pending: Offer
 ## After a boss: the trinkets on offer are free, and taking one takes the others off the shelf.
 var _free_trinket := false
+## Trinket and skill rerolls bought this visit.
+var _rerolls := 0
+## The reroll button of each kind that has one (Kind.TRINKET, Kind.SKILL).
+var _reroll_buttons := {}
 
 var _title := Label.new()
 var _crumbs_label := Label.new()
@@ -132,10 +139,10 @@ func open(run: Run, free_trinket := false) -> void:
 	_run = run
 	_offers.clear()
 	_free_trinket = free_trinket
+	_rerolls = 0
 	_trinket_hint.text = "Boss reward: take one for free." if free_trinket else "Yours for the rest of the run."
-	var trinkets: Array = Items.Trinket.values().filter(func(t: int) -> bool: return not run.has(t))
-	_fill_row(Kind.TRINKET, trinkets, Boss.FREE_TRINKETS if free_trinket else OFFERS_PER_ROW)
-	_fill_row(Kind.SKILL, Items.Skill.values().filter(func(s: int) -> bool: return not run.has_skill(s)))
+	_fill_row(Kind.TRINKET, _unowned(Kind.TRINKET), _row_size(Kind.TRINKET))
+	_fill_row(Kind.SKILL, _unowned(Kind.SKILL))
 	var boss_next := Boss.is_boss_round(run.round_number + 1)
 	_boss_label.visible = boss_next
 	_boss_label.text = "Next round is a boss. %s" % Boss.describe(run.next_boss)
@@ -171,9 +178,12 @@ func _add_section(kind: Kind, title: String, hint: String) -> void:
 			hint_label = Label.new()
 	hint_label.text = hint
 	hint_label.size_flags_vertical = Control.SIZE_SHRINK_END
+	hint_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	hint_label.modulate = Color(1, 1, 1, 0.6)
 	hint_label.add_theme_font_size_override("font_size", 13)
 	labels.add_child(hint_label)
+	if kind == Kind.TRINKET or kind == Kind.SKILL:
+		labels.add_child(_make_reroll_button(kind))
 	section.add_child(labels)
 	var offers := HBoxContainer.new()
 	offers.add_theme_constant_override("separation", 10)
@@ -182,13 +192,19 @@ func _add_section(kind: Kind, title: String, hint: String) -> void:
 	_sections.add_child(section)
 
 
-## Puts up to count random picks from pool up for sale in the kind's row.
-func _fill_row(kind: Kind, pool: Array, count := OFFERS_PER_ROW) -> void:
+## Puts up to count random picks from pool up for sale in the kind's row, in place of what was there.
+## Picks from avoid come last, so a reroll shows new things while there are any.
+func _fill_row(kind: Kind, pool: Array, count := OFFERS_PER_ROW, avoid: Array = []) -> void:
 	var row: HBoxContainer = _rows[kind]
 	for child in row.get_children():
 		row.remove_child(child)
 		child.queue_free()
-	pool.shuffle()
+	_offers.assign(_offers.filter(func(o: Offer) -> bool: return o.kind != kind))
+	var fresh := pool.filter(func(id: int) -> bool: return id not in avoid)
+	var seen := pool.filter(func(id: int) -> bool: return id in avoid)
+	fresh.shuffle()
+	seen.shuffle()
+	pool = fresh + seen
 	for id: int in pool.slice(0, count):
 		var offer := Offer.new()
 		offer.kind = kind
@@ -201,6 +217,69 @@ func _fill_row(kind: Kind, pool: Array, count := OFFERS_PER_ROW) -> void:
 		none.text = "Sold out."
 		none.modulate = Color(1, 1, 1, 0.6)
 		row.add_child(none)
+
+
+## The trinkets or skills the run doesn't have yet.
+func _unowned(kind: Kind) -> Array:
+	if kind == Kind.TRINKET:
+		return Items.Trinket.values().filter(func(t: int) -> bool: return not _run.has(t))
+	return Items.Skill.values().filter(func(s: int) -> bool: return not _run.has_skill(s))
+
+
+## How many offers the trinket or skill row shows.
+func _row_size(kind: Kind) -> int:
+	return Boss.FREE_TRINKETS if kind == Kind.TRINKET and _free_trinket else OFFERS_PER_ROW
+
+
+func _reroll_price() -> int:
+	return REROLL_PRICE * (_rerolls + 1)
+
+
+func _make_reroll_button(kind: Kind) -> Button:
+	var button := Button.new()
+	var color := Items.TRINKET_COLOR if kind == Kind.TRINKET else Items.SKILL_COLOR
+	button.add_theme_stylebox_override("normal", _button_style(color.darkened(0.45), color))
+	button.add_theme_stylebox_override("hover", _button_style(color.darkened(0.3), color.lightened(0.3)))
+	button.add_theme_stylebox_override("pressed", _button_style(color.darkened(0.6), color))
+	button.add_theme_stylebox_override("disabled", _button_style(Color(0, 0, 0, 0.2), Color(color, 0.3)))
+	for state in ["font_color", "font_hover_color", "font_pressed_color"]:
+		button.add_theme_color_override(state, Color("f4ecd8"))
+	button.add_theme_color_override("font_disabled_color", Color(1, 1, 1, 0.4))
+	button.add_theme_font_size_override("font_size", 13)
+	if DisplayServer.is_touchscreen_available():
+		button.custom_minimum_size.y = TOUCH_BUTTON_HEIGHT
+	button.focus_mode = Control.FOCUS_NONE
+	button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	button.tooltip_text = "New offers in this row. Each reroll, of trinkets or skills, costs %d more than the last." \
+			% REROLL_PRICE
+	button.pressed.connect(_reroll.bind(kind))
+	_reroll_buttons[kind] = button
+	return button
+
+
+## Whether rerolling the kind's row could change anything: there's something left to offer, the
+## skill slots aren't full, and the boss's free trinket hasn't been taken.
+func _can_reroll(kind: Kind) -> bool:
+	if _unowned(kind).is_empty():
+		return false
+	if kind == Kind.SKILL:
+		return _run.skills.size() < Items.SKILL_SLOTS
+	return not (_free_trinket and _offers.any(func(o: Offer) -> bool: return o.kind == Kind.TRINKET and o.sold))
+
+
+## Pays for a reroll and rolls new offers for the kind's row.
+func _reroll(kind: Kind) -> void:
+	var price := _reroll_price()
+	if price > _run.crumbs or not _can_reroll(kind):
+		return
+	_run.crumbs -= price
+	_rerolls += 1
+	var shown: Array = _offers.filter(func(o: Offer) -> bool: return o.kind == kind) \
+			.map(func(o: Offer) -> int: return o.id)
+	_fill_row(kind, _unowned(kind), _row_size(kind), shown)
+	BugReport.note("Rerolled the %s for %d (%d crumbs left)" % ["trinkets" if kind == Kind.TRINKET else "skills",
+			price, _run.crumbs])
+	refresh()
 
 
 func _make_tile(offer: Offer) -> Control:
@@ -381,6 +460,10 @@ func refresh() -> void:
 		var buy := "Take" if offer.price == 0 else "Buy (%d)" % offer.price
 		offer.button.text = "Sold" if offer.sold else ("Owned" if owned else (full if blocked else buy))
 		offer.button.disabled = offer.sold or owned or blocked or offer.price > _run.crumbs
+	for kind: Kind in _reroll_buttons:
+		var button: Button = _reroll_buttons[kind]
+		button.text = "Reroll (%d)" % _reroll_price()
+		button.disabled = _reroll_price() > _run.crumbs or not _can_reroll(kind)
 
 
 func _on_next_round() -> void:

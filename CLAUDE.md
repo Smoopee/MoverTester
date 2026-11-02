@@ -94,7 +94,9 @@ slots at the start of a turn and shrinks the cards so the slots and the hand eac
 Rounds chain into an endless **run**: the deck, crumbs, trinkets, pouch, slots and hand size carry over until a trap
 or a cat catches the mouse (or a pylon or flamethrower), or the turns run out, or a boss round ends short of its score target (`main.gd` `lost()`), which starts a new run. A won round pays crumbs (`WIN_CRUMBS` + unused discards + the score bonus, plus
 crumbs picked up on the board), then opens the **shop**. It sells trinkets (passive for the run),
-skills, consumables (held in the pouch, used once) and card stamps (a slot effect stuck on one card). A
+skills, consumables (held in the pouch, used once) and card stamps (a slot effect stuck on one card).
+The trinket and skill rows each have a Reroll button (`shop.gd` `_reroll`): the first reroll in a
+visit costs `Shop.REROLL_PRICE` (5) crumbs and each one after costs 5 more, counted across both rows. A
 stamped card plays its slot's effect first, then its stamp (`main.gd` `_play`): a BURN slot with a
 SLIDE stamp moves 3 cells, then slides. A burned card stays burned whatever its stamp. Some effects
 are stamps only, never rolled on a slot (`CardSlot.STAMP_ONLY`). Some are set by clicking the stamp
@@ -110,10 +112,10 @@ and `_bank_turn` adds the turn to the score, with `Score.SPARE_TURN_MULT` per tu
 turn that reaches the cheese. Only the real board is connected, so the preview scores nothing. The
 round's target (`Score.target`) grows each round, and more in a boss round. Meeting it pays bonus
 crumbs (`Score.crumbs`), and missing it in a boss round ends the run (`_short_of_boss_target`). The
-score trinkets are BUTTER PAWS, HARD HEAD, SHOW-OFF, JOYRIDE and DAREDEVIL.
+score trinkets are BUTTER PAT and RIDE TICKET; the score skills are HARD HEAD, SHOW-OFF and DAREDEVIL.
 
 Score shows as **popups** (`scripts/score_popup.gd` `ScorePopup`): points pop up on the cell that
-made them (`main.gd` `_add_points`, which every point source goes through), mult from trinkets over
+made them (`main.gd` `_add_points`, which every point source goes through), mult from trinkets and skills over
 the mouse (`_pop_mult`), and the banked turn over the board (`pop_turn_score`). Each popup's
 intensity grows with the score (a move's points on a log scale, a turn's against the round's target):
 bigger, hotter in color, shaking, with sparks and a ring at the top. No popups when
@@ -122,7 +124,17 @@ bigger, hotter in color, shaking, with sparks and a ring at the top. No popups w
 **Skills** (`Items.Skill`, `Run.skills`) are always-on abilities for the rest of the run, held in
 `Items.SKILL_SLOTS` (4) slots shown above the card slots (`main.gd` `_refresh_skills`). WARP makes
 every step wrap round the board's edges like a WRAP slot (`Board.warp`); EFFICIENT gives +1 discard
-for each crumb picked up (`_on_crumb_collected`).
+for each crumb picked up (`_on_crumb_collected`); THICK FUR breaks the first trap each round
+(`_survive_trap`). A skill's slot lights up (`_flash_skill`) whenever it does something.
+
+**Trinkets are objects, skills are traits.** Any new or renamed item follows these rules:
+- A **trinket** is a physical thing the mouse carries, named as one (PIGGY BANK, CRUMB MAGNET), and
+  its effect is what that object would plausibly do: a piggy bank saves crumbs, a magnet pulls them in.
+  Never a body part, an ability or an adjective.
+- A **skill** is a trait or ability of the mouse itself, named as something the mouse is or can do
+  (WARP, EFFICIENT), and its effect is that trait at work. Never an object.
+- If an idea reads as something the mouse *has in its pouch*, it's a trinket; if it reads as
+  something the mouse *is or does*, it's a skill. Pick the name and the category together.
 
 Every `Boss.EVERY` (3) rounds is a **boss round** with an extra rule: THE ALLEY KING (a big cat that
 hunts the mouse, on top of the usual cats), RUNAWAY CHEESE (the cheese runs from the mouse; a few
@@ -181,8 +193,8 @@ pays `Boss.WIN_CRUMBS`, adds a card slot and a card in hand, and offers a free t
 - `scripts/skill_slot.gd` — `SkillSlot`: one of the skill slots in `%SkillRow` above the card slots,
   drawn as a squarer card with the skill's symbol and name (or empty). `flash()` lights it up when its
   skill does something.
-- `scripts/shop.gd` — `Shop`: overlay after a won round. Rolls offers, sells them, and picks the card
-  for a stamp.
+- `scripts/shop.gd` — `Shop`: overlay after a won round. Rolls offers, rerolls the trinket and skill
+  rows, sells them, and picks the card for a stamp.
 - `scripts/touch_tips.gd` — `TouchTips`: hold-to-show tooltips on a touchscreen (see Touch above).
 - `scripts/pile_button.gd` — `PileButton`: the draw and discard piles either side of the hand, drawn
   as a card stack with a count (card back / skull). The discard pile also takes dropped cards.
@@ -221,8 +233,8 @@ The sim lets runs go on, so it prints win/loss rates per round number (the diffi
 `--round N` to play every round as round N, `--boss <name>` to make every round that boss, and
 `--slots N` / `--hand N` to start every run with that many slots / cards in hand. The round table
 also shows the bot's mean score in won rounds against the target. The bot plays for the cheese, not the
-score, so its score is a floor. `--trinkets show_off,daredevil` starts every run with those
-trinkets.
+score, so its score is a floor. `--trinkets butter_pat,ride_ticket` starts every run with those
+trinkets, and `--skills show_off,daredevil` with those skills.
 
 A new `class_name` script isn't visible to the parse check until Godot refreshes its class cache:
 `"/c/Program Files/Godot/godot.exe" --headless --path . --import`.

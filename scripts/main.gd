@@ -53,12 +53,12 @@ const CAT_MIN_DISTANCE := 6
 const EFFECT_CHANCE := 0.5
 ## Cards the player can swap for a new draw each round.
 const DISCARDS_PER_ROUND := 5
-const SPARE_PAWS_DISCARDS := 2
+const WASTEBASKET_DISCARDS := 2
 ## Crumbs for reaching the cheese. Unused discards pay 1 each on top.
 const WIN_CRUMBS := 5
 const PIGGY_BANK_MAX := 5
-## Extra crumbs each crumb picked up on the board pays with BOUNTIFUL HARVEST.
-const HARVEST_CRUMBS := 2
+## Extra crumbs each crumb picked up on the board pays with the SALT SHAKER.
+const SALT_SHAKER_CRUMBS := 2
 const HINT := "Click a card to put it in the next slot, or drag it to a slot. Then Lock In."
 ## Color of the discard area under the hand, which lights up while a card is dragged.
 const DISCARD_COLOR := Color("e07a5f")
@@ -282,8 +282,8 @@ func new_round() -> void:
 	out_of_time = false
 	run_over = false
 	discards_left = DISCARDS_PER_ROUND
-	if run.has(Items.Trinket.SPARE_PAWS):
-		discards_left += SPARE_PAWS_DISCARDS
+	if run.has(Items.Trinket.WASTEBASKET):
+		discards_left += WASTEBASKET_DISCARDS
 	round_crumbs = 0
 	round_score = 0
 	score_target = Score.target(run.round_number, run.boss != -1)
@@ -621,24 +621,25 @@ func _short_of_boss_target() -> bool:
 
 
 ## Scores a move of the mouse (Board.mouse_moved): points for the cells it moved and the rides it
-## took, and mult from BUTTER PAWS, HARD HEAD and JOYRIDE. Only the real board is connected, so the
+## took, plus what the BUTTER PAT, RIDE TICKET and HARD HEAD add. Only the real board is connected, so the
 ## preview scores nothing.
 func _on_mouse_moved(motion: Board.Motion, cells: int) -> void:
 	match motion:
 		Board.Motion.STEP, Board.Motion.JUMP:
 			_add_points(cells * Score.CELL_POINTS, board.mouse_cell)
 		Board.Motion.SLIDE:
-			var butter := Score.BUTTER_PAWS_POINTS if run.has(Items.Trinket.BUTTER_PAWS) else 0
+			var butter := Score.BUTTER_PAT_POINTS if run.has(Items.Trinket.BUTTER_PAT) else 0
 			_add_points(cells * (Score.CELL_POINTS + butter), board.mouse_cell)
 		Board.Motion.RIDE:
 			_add_points(Score.RIDE_POINTS, board.mouse_cell)
-			if run.has(Items.Trinket.JOYRIDE):
-				turn_mult += Score.JOYRIDE_MULT
-				_pop_mult("+%d mult" % Score.JOYRIDE_MULT)
+			if run.has(Items.Trinket.RIDE_TICKET):
+				turn_mult += Score.RIDE_TICKET_MULT
+				_pop_mult("+%d mult" % Score.RIDE_TICKET_MULT)
 		Board.Motion.BUMP:
-			if run.has(Items.Trinket.HARD_HEAD):
+			if run.has_skill(Items.Skill.HARD_HEAD):
 				turn_mult += Score.HARD_HEAD_MULT
 				_pop_mult("+%d mult" % Score.HARD_HEAD_MULT)
+				_flash_skill(Items.Skill.HARD_HEAD)
 	_refresh_hud()
 
 
@@ -654,7 +655,7 @@ func _score_cards(played: Array[CardSlot]) -> void:
 	if shiny > 0:
 		turn_mult += shiny * Score.SHINY_MULT
 		_pop_mult("+%d mult" % (shiny * Score.SHINY_MULT))
-	if run.has(Items.Trinket.SHOW_OFF):
+	if run.has_skill(Items.Skill.SHOW_OFF):
 		var effects := 0
 		for slot in played:
 			var card := slot.get_card()
@@ -664,12 +665,14 @@ func _score_cards(played: Array[CardSlot]) -> void:
 		turn_mult += effects * Score.SHOW_OFF_MULT
 		if effects > 0:
 			_pop_mult("+%d mult" % (effects * Score.SHOW_OFF_MULT))
-	if run.has(Items.Trinket.DAREDEVIL) and not _round_over():
+			_flash_skill(Items.Skill.SHOW_OFF)
+	if run.has_skill(Items.Skill.DAREDEVIL) and not _round_over():
 		for offset: Vector2i in Card.OFFSETS.values():
 			if board.is_deadly(board.mouse_cell + offset):
 				turn_mult *= Score.DAREDEVIL_TIMES
 				_pop_mult("×%d mult" % Score.DAREDEVIL_TIMES)
 				BugReport.note("  DAREDEVIL: next to danger at %s" % (board.mouse_cell + offset))
+				_flash_skill(Items.Skill.DAREDEVIL)
 				break
 	_refresh_hud()
 
@@ -708,7 +711,7 @@ func _pop_points() -> void:
 	_pending_points.clear()
 
 
-## Pops up mult a trinket added this turn, over the mouse.
+## Pops up mult a trinket or skill added this turn, over the mouse.
 func _pop_mult(text: String) -> void:
 	if board.animate:
 		ScorePopup.spawn(self, board.cell_global_center(board.mouse_cell) + Vector2(0, -18), text, 0.45,
@@ -731,12 +734,15 @@ func pop_turn_score(gained: int, points: int, mult: int) -> void:
 ## If the mouse is on a trap and THICK FUR hasn't been used this round, breaks the trap and returns
 ## true so the turn carries on.
 func _survive_trap() -> bool:
-	if not board.is_trapped() or trap_survived or not run.has(Items.Trinket.THICK_FUR):
+	if not board.is_trapped() or trap_survived or not run.has_skill(Items.Skill.THICK_FUR):
 		return false
 	trap_survived = true
 	board.remove_trap(board.mouse_cell)
 	BugReport.note("  THICK FUR broke the trap at %s" % board.mouse_cell)
 	status_label.text = "Thick Fur! The trap broke. It won't save you again this round."
+	# The preview's board doesn't animate, and the preview shouldn't light up the skill.
+	if board.animate:
+		_flash_skill(Items.Skill.THICK_FUR)
 	return true
 
 
@@ -925,7 +931,7 @@ func _roll_effects() -> void:
 	pool.erase(CardSlot.Effect.NONE)
 	for effect in CardSlot.STAMP_ONLY:
 		pool.erase(effect)
-	if run.has(Items.Trinket.LUCKY_TAIL):
+	if run.has(Items.Trinket.FOUR_LEAF_CLOVER):
 		pool.erase(CardSlot.Effect.BLOCKED)
 	# Don't burn the deck down below a full hand.
 	if run.deck.draw_pile.size() + run.deck.discard_pile.size() + _all_cards().size() <= _hand_size():
@@ -1155,7 +1161,7 @@ func _on_door_unlocked(_edge: Vector3i) -> void:
 
 
 func _on_crumb_collected(cell: Vector2i) -> void:
-	var worth := 1 + (HARVEST_CRUMBS if run.has(Items.Trinket.BOUNTIFUL_HARVEST) else 0)
+	var worth := 1 + (SALT_SHAKER_CRUMBS if run.has(Items.Trinket.SALT_SHAKER) else 0)
 	run.crumbs += worth
 	round_crumbs += worth
 	_add_points(Score.CRUMB_POINTS, cell)

@@ -93,12 +93,14 @@ func _paint(to_canvas_item: RID, rect: Rect2, modulate: Color) -> void:
 
 func _draw_trinket(trinket_id: int, dark: Color) -> void:
 	match trinket_id:
-		Items.Trinket.SPARE_PAWS:
-			# A paw print.
-			_ellipse(Vector2(0, 4), Vector2(5.5, 4.5), 0.0, color)
-			for toe: Vector2 in [Vector2(-6.5, -2), Vector2(-2.4, -6.5), Vector2(2.4, -6.5), Vector2(6.5, -2)]:
-				_circle(toe, 2.5, color)
-		Items.Trinket.LUCKY_TAIL:
+		Items.Trinket.WASTEBASKET:
+			# A card dropping into a tapered bin.
+			_polygon([Vector2(-4, -11.5), Vector2(2.5, -12.5), Vector2(3.5, -5), Vector2(-3, -4)], color.lightened(0.5))
+			_polygon([Vector2(-7, -5), Vector2(7, -5), Vector2(5.5, 10.5), Vector2(-5.5, 10.5)], color)
+			_rect(Rect2(-8.5, -7, 17, 2.5), color.lightened(0.2))
+			for x: float in [-3.0, 0.0, 3.0]:
+				_line([Vector2(x, -2.5), Vector2(x * 0.8, 8)], 1.2, dark)
+		Items.Trinket.FOUR_LEAF_CLOVER:
 			# A four-leaf clover.
 			_line([Vector2(0, 0), Vector2(1.5, 5), Vector2(4, 10)], 1.8, color)
 			# Each leaf is a heart: two lobes and a point at the middle.
@@ -109,11 +111,6 @@ func _draw_trinket(trinket_id: int, dark: Color) -> void:
 				_circle(mid + d * 5.4 + n * 1.9, 2.3, color)
 				_circle(mid + d * 5.4 - n * 1.9, 2.3, color)
 				_polygon([mid + d * 0.6, mid + d * 5.6 + n * 4.1, mid + d * 5.6 - n * 4.1], color)
-		Items.Trinket.THICK_FUR:
-			# A shield with a tuft of fur across it.
-			_polygon([Vector2(-8, -8), Vector2(0, -10.5), Vector2(8, -8), Vector2(8, -1), Vector2(5, 5),
-					Vector2(0, 10), Vector2(-5, 5), Vector2(-8, -1)], color)
-			_line([Vector2(-5, 0), Vector2(-2.5, -3.5), Vector2(0, 0), Vector2(2.5, -3.5), Vector2(5, 0)], 1.6, dark)
 		Items.Trinket.CRUMB_MAGNET:
 			# A horseshoe magnet with light tips and a crumb between them.
 			var points: Array[Vector2] = [Vector2(-6, -7)]
@@ -137,45 +134,32 @@ func _draw_trinket(trinket_id: int, dark: Color) -> void:
 			_circle(Vector2(4.5, -1), 1.1, dark)
 			_line([Vector2(-4.5, -3), Vector2(-0.5, -3)], 1.6, dark)
 			_line([Vector2(-8.5, 0), Vector2(-10.5, -1.5), Vector2(-10, -3.5), Vector2(-8.5, -3)], 1.3, color)
-		Items.Trinket.BOUNTIFUL_HARVEST:
-			# An ear of wheat.
-			_line([Vector2(0, 10.5), Vector2(0, -5)], 1.6, color)
-			for i in 3:
-				var y := -5.0 + i * 4.6
-				_ellipse(Vector2(-3, y), Vector2(1.6, 3), -0.6, color)
-				_ellipse(Vector2(3, y), Vector2(1.6, 3), 0.6, color)
-			_ellipse(Vector2(0, -8.5), Vector2(1.6, 3), 0.0, color)
-		Items.Trinket.BUTTER_PAWS:
+		Items.Trinket.SALT_SHAKER:
+			# A shaker with a domed, holed cap, and salt falling from it.
+			_ellipse(Vector2(1, -2), Vector2(5.5, 5), 0.0, color.lightened(0.3))
+			_rect(Rect2(-4.5, -2, 11, 12.5), color)
+			_rect(Rect2(-4.5, -2, 11, 1.5), dark)
+			for hole: Vector2 in [Vector2(-1.5, -4.5), Vector2(1, -5.5), Vector2(3.5, -4.5)]:
+				_circle(hole, 0.8, dark)
+			for grain: Vector2 in [Vector2(-7, -9), Vector2(-4, -11), Vector2(-9.5, -5.5), Vector2(-8, -1)]:
+				_circle(grain, 1, color)
+		Items.Trinket.BUTTER_PAT:
 			# A pat of butter, with speed lines trailing it.
 			_polygon([Vector2(-3, -2), Vector2(4, -6), Vector2(11, -2), Vector2(4, 2)], color.lightened(0.4))
 			_polygon([Vector2(-3, -2), Vector2(4, 2), Vector2(4, 7), Vector2(-3, 3)], color)
 			_polygon([Vector2(4, 2), Vector2(11, -2), Vector2(11, 3), Vector2(4, 7)], color.darkened(0.2))
 			for y: float in [-4.0, 1.0, 6.0]:
 				_line([Vector2(-11, y), Vector2(-5.5, y)], 1.6, color)
-		Items.Trinket.HARD_HEAD:
-			# A wall, and a burst where something bonked it.
-			_rect(Rect2(6, -11, 4, 22), color)
-			for i in 5:
-				var d := Vector2.from_angle(PI / 2 + PI / 4 + i * PI / 8)
-				_line([Vector2(3, 0) + d * 4, Vector2(3, 0) + d * 10], 1.8, color)
-			_circle(Vector2(3, 0), 2.2, color)
-		Items.Trinket.SHOW_OFF:
-			# A five-pointed star.
-			var points: Array[Vector2] = []
-			for i in 10:
-				points.append(Vector2.from_angle(-PI / 2 + i * PI / 5) * (10.5 if i % 2 == 0 else 4.5))
+		Items.Trinket.RIDE_TICKET:
+			# A ticket with notched ends, a tear-off stub and a star.
+			var points: Array[Vector2] = [Vector2(-11, -6), Vector2(11, -6)]
+			points.append_array(_arc(Vector2(11, 0), 2.5, -PI / 2, -PI * 1.5, 6))
+			points.append_array([Vector2(11, 6), Vector2(-11, 6)])
+			points.append_array(_arc(Vector2(-11, 0), 2.5, PI / 2, -PI / 2, 6))
 			_polygon(points, color)
-		Items.Trinket.JOYRIDE:
-			# Down one mouse hole and out the other: an arrow arcing between two holes.
-			_ellipse(Vector2(-7, 7.5), Vector2(4, 2.2), 0.0, color)
-			_ellipse(Vector2(7, 7.5), Vector2(4, 2.2), 0.0, color)
-			_line(_arc(Vector2(0, 3), 7, -PI, -PI * 0.12, 14), 2, color)
-			_polygon([Vector2(3.5, 1.5), Vector2(10.5, 0.5), Vector2(7.5, 6)], color)
-		Items.Trinket.DAREDEVIL:
-			# A warning sign.
-			_polygon([Vector2(0, -10.5), Vector2(11, 9), Vector2(-11, 9)], color)
-			_line([Vector2(0, -3.5), Vector2(0, 3)], 2.2, dark)
-			_circle(Vector2(0, 6), 1.3, dark)
+			for y: float in [-4.5, -1.0, 2.5]:
+				_line([Vector2(5, y), Vector2(5, y + 2)], 1.2, dark)
+			_star(Vector2(-2, 0), 4, dark)
 
 
 func _draw_skill(skill_id: int, dark: Color) -> void:
@@ -196,6 +180,26 @@ func _draw_skill(skill_id: int, dark: Color) -> void:
 			_rect(Rect2(1.5, -9, 9.5, 14), color)
 			_line([Vector2(6.25, -5), Vector2(6.25, 1)], 1.8, dark)
 			_line([Vector2(3.25, -2), Vector2(9.25, -2)], 1.8, dark)
+		Items.Skill.THICK_FUR:
+			# A shield with a tuft of fur across it.
+			_polygon([Vector2(-8, -8), Vector2(0, -10.5), Vector2(8, -8), Vector2(8, -1), Vector2(5, 5),
+					Vector2(0, 10), Vector2(-5, 5), Vector2(-8, -1)], color)
+			_line([Vector2(-5, 0), Vector2(-2.5, -3.5), Vector2(0, 0), Vector2(2.5, -3.5), Vector2(5, 0)], 1.6, dark)
+		Items.Skill.HARD_HEAD:
+			# A wall, and a burst where something bonked it.
+			_rect(Rect2(6, -11, 4, 22), color)
+			for i in 5:
+				var d := Vector2.from_angle(PI / 2 + PI / 4 + i * PI / 8)
+				_line([Vector2(3, 0) + d * 4, Vector2(3, 0) + d * 10], 1.8, color)
+			_circle(Vector2(3, 0), 2.2, color)
+		Items.Skill.SHOW_OFF:
+			# A five-pointed star.
+			_star(Vector2.ZERO, 10.5, color)
+		Items.Skill.DAREDEVIL:
+			# A warning sign.
+			_polygon([Vector2(0, -10.5), Vector2(11, 9), Vector2(-11, 9)], color)
+			_line([Vector2(0, -3.5), Vector2(0, 3)], 2.2, dark)
+			_circle(Vector2(0, 6), 1.3, dark)
 
 
 func _draw_consumable(consumable_id: int, dark: Color) -> void:

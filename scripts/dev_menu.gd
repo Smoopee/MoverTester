@@ -311,8 +311,8 @@ func _build_items_tab(box: VBoxContainer) -> void:
 		_did("Discards +5 (%d left)" % game.discards_left))
 	_button(row, "Refill", func() -> void:
 		game.discards_left = Main.DISCARDS_PER_ROUND
-		if game.run.has(Items.Trinket.SPARE_PAWS):
-			game.discards_left += Main.SPARE_PAWS_DISCARDS
+		if game.run.has(Items.Trinket.WASTEBASKET):
+			game.discards_left += Main.WASTEBASKET_DISCARDS
 		game.refresh_ui()
 		_did("Discards refilled (%d left)" % game.discards_left))
 
