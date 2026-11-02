@@ -1,7 +1,7 @@
 class_name Run
 extends RefCounted
 ## Everything that carries from round to round until the mouse is caught: the deck, crumbs, trinkets,
-## skills, the pouch of consumables, and the card slots and hand size that chests add to.
+## skills, the pouch of consumables, and the card slots and hand size that beating a boss adds to.
 
 const START_SLOTS := 4
 const MAX_SLOTS := 8

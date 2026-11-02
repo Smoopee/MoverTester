@@ -600,7 +600,7 @@ func _add_round(by: int) -> void:
 		Difficulty.describe(game.run.round_number)])
 
 
-## Changes the run's card slots and hand size, as a chest does, and deals a new hand mid-round.
+## Changes the run's card slots and hand size, as beating a boss does, and deals a new hand mid-round.
 func _add_slots(slots_by: int, hand_by: int) -> void:
 	if _idle():
 		game.set_slots_and_hand(game.run.slots + slots_by, game.run.hand_size + hand_by)

@@ -7,7 +7,7 @@ extends SceneTree
 ## Runs go on until the bot loses, so later rounds are bigger and busier (see Difficulty). --round N
 ## plays every round as round N of a fresh run instead. Boss rounds are off unless --boss names one
 ## (alley_king, runaway_cheese, kitchen_light): then every round is that boss, each on a fresh run.
-## --slots N and --hand N start every run with that many card slots and cards in hand (chests add more).
+## --slots N and --hand N start every run with that many card slots and cards in hand (boss wins add more, but bosses are off by default).
 
 const MAX_TURNS := 200
 

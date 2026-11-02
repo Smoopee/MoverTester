@@ -76,10 +76,12 @@ path length around the walls and traps (`Board.distances_from`) with a few spare
 over the run.
 
 A round may have a **chest** (`main.gd` `CHEST_CHANCE`, `_place_chests`), opened by walking or
-sliding over it like a crumb. It gives, at random, a card slot (`Run.slots`, up to 8, and never more
-slots than cards in hand) or a card in the hand (`Run.hand_size`, up to 10) for the rest of the run,
-from the next turn (`_open_chest`); crumbs once both are maxed. `_build_slots` rebuilds the slots at
-the start of a turn and shrinks the cards so the slots and the hand each fit their row.
+sliding over it like a crumb. It pays `CHEST_CRUMBS` (12) (`_open_chest`).
+
+Card slots (`Run.slots`, up to 8, never more than cards in hand) and cards in hand (`Run.hand_size`,
+up to 10) grow only by beating a boss: each adds `Boss.SLOTS_GAINED` and `Boss.HAND_GAINED` (1 each)
+for the rest of the run, from the next round (`main.gd` `_boss_upgrade`). `_build_slots` rebuilds the
+slots at the start of a turn and shrinks the cards so the slots and the hand each fit their row.
 
 Rounds chain into an endless **run**: the deck, crumbs, trinkets, pouch, slots and hand size carry over until a trap
 or a cat catches the mouse (or a pylon or flamethrower), or the turns run out (`main.gd` `lost()`), which starts a new run. A won round pays crumbs (`WIN_CRUMBS` + unused discards, plus
@@ -96,7 +98,7 @@ for each crumb picked up (`_on_crumb_collected`).
 Every `Boss.EVERY` (3) rounds is a **boss round** with an extra rule: THE ALLEY KING (a big cat that
 hunts the mouse, on top of the usual cats), RUNAWAY CHEESE (the cheese runs from the mouse; a few
 extra turns) or KITCHEN LIGHT (a shorter turn limit). The shop before it names the boss. Beating one
-pays `Boss.WIN_CRUMBS` and offers a free trinket.
+pays `Boss.WIN_CRUMBS`, adds a card slot and a card in hand, and offers a free trinket.
 
 ## Layout
 - `scenes/main.tscn` — the only scene. Nodes the code uses are `%Unique` names (`%Board`, `%Hand`,

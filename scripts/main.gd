@@ -2,12 +2,11 @@ class_name Main
 extends Control
 ## Game controller: runs a run of rounds, deals hands, handles card placement, and plays locked-in turns.
 
-## Chance that a round has a chest. Opening it gives a card slot or a card in the hand for the rest of
-## the run (Run.slots, Run.hand_size), or CHEST_CRUMBS once both are at their most.
+## Chance that a round has a chest. Opening it pays CHEST_CRUMBS.
 const CHEST_CHANCE := 0.4
 ## The chest is at least this many cells from the mouse.
 const CHEST_MIN_DISTANCE := 4
-const CHEST_CRUMBS := 5
+const CHEST_CRUMBS := 12
 ## Width of the row of slots, and of the hand between the piles. Cards shrink so a row of them fits.
 const ROW_WIDTH := 560.0
 const HAND_WIDTH := 480.0
@@ -253,7 +252,7 @@ func new_round() -> void:
 
 
 func start_turn() -> void:
-	# A chest opened last turn can have added a slot or a card.
+	# Beating a boss, or the dev menu, can have added a slot or a card.
 	_build_slots()
 	var drawn: Array[CardData] = []
 	drawn.append_array(recycled)
@@ -511,7 +510,7 @@ func _end_round() -> void:
 		if round_crumbs > 0:
 			lines.append("Crumbs picked up  +%d" % round_crumbs)
 		for chest in chest_rewards:
-			lines.append("Chest: %s" % chest)
+			lines.append("Chest  %s" % chest)
 		run.crumbs += earned
 		lines.append("You have %d crumbs." % run.crumbs)
 		BugReport.note("Found the cheese on turn %d, earned %d (+%d picked up), %d crumbs" % [
@@ -520,6 +519,7 @@ func _end_round() -> void:
 		if run.boss != -1:
 			run.bosses_beaten += 1
 			win_label.text = "You beat %s in %d turn%s!" % [Boss.INFO[run.boss][0], turn, "" if turn == 1 else "s"]
+			lines.append_array(_boss_upgrade())
 			lines.append("Take a free trinket in the shop.")
 		lines.append("Next round: %s." % Difficulty.describe(run.round_number + 1))
 		win_details.text = "\n".join(lines)
@@ -676,35 +676,32 @@ func _hand_size() -> int:
 	return run.hand_size
 
 
-## Gives a card slot or a card in the hand for the rest of the run, picked at random, starting next
-## turn. A slot is only on offer while there are fewer slots than cards, so it can be filled. Once
-## neither can grow, pays CHEST_CRUMBS instead.
+## Pays CHEST_CRUMBS.
 func _open_chest(cell: Vector2i) -> void:
-	var rewards: Array[String] = []
-	if run.slots < mini(run.hand_size, Run.MAX_SLOTS):
-		rewards.append("slot")
-	if run.hand_size < Run.MAX_HAND_SIZE:
-		rewards.append("card")
-	var reward: String = "crumbs" if rewards.is_empty() else rewards.pick_random()
-	var text := ""
-	match reward:
-		"slot":
-			run.slots += 1
-			text = "+1 card slot (%d now)" % run.slots
-			chest_note = "Chest! You have another card slot: %d now." % run.slots
-		"card":
-			run.hand_size += 1
-			text = "+1 card in hand (%d now)" % run.hand_size
-			chest_note = "Chest! You draw another card each turn: %d now." % run.hand_size
-		"crumbs":
-			run.crumbs += CHEST_CRUMBS
-			round_crumbs += CHEST_CRUMBS
-			text = "+%d crumbs" % CHEST_CRUMBS
-			chest_note = "Chest! %d crumbs." % CHEST_CRUMBS
-			_refresh_hud()
+	run.crumbs += CHEST_CRUMBS
+	var text := "+%d" % CHEST_CRUMBS
+	chest_note = "Chest! %d crumbs." % CHEST_CRUMBS
+	_refresh_hud()
 	chest_rewards.append(text)
 	status_label.text = chest_note
 	BugReport.note("  Opened a chest at %s: %s" % [cell, text])
+
+
+## After a boss: Boss.HAND_GAINED more cards in hand and Boss.SLOTS_GAINED more card slots for the rest
+## of the run, from the next round, up to Run.MAX_HAND_SIZE and Run.MAX_SLOTS (and never more slots than
+## cards). Returns a win panel line for each that grew.
+func _boss_upgrade() -> PackedStringArray:
+	var lines := PackedStringArray()
+	var hand := mini(run.hand_size + Boss.HAND_GAINED, Run.MAX_HAND_SIZE)
+	var count := mini(run.slots + Boss.SLOTS_GAINED, mini(hand, Run.MAX_SLOTS))
+	if count > run.slots:
+		lines.append("+%d card slot%s (%d now)" % [count - run.slots, "" if count - run.slots == 1 else "s", count])
+	if hand > run.hand_size:
+		lines.append("+%d card%s in hand (%d now)" % [hand - run.hand_size, "" if hand - run.hand_size == 1 else "s", hand])
+	run.slots = count
+	run.hand_size = hand
+	BugReport.note("  Boss upgrade: %d slots, hand size %d" % [run.slots, run.hand_size])
+	return lines
 
 
 ## Slots in the order they play: left to right, with LAST slots moved to the end.
@@ -1147,7 +1144,7 @@ func reroll_effects() -> void:
 		_roll_effects()
 
 
-## Sets the run's card slots and hand size, as chests would. Mid-round, the cards held go to the
+## Sets the run's card slots and hand size, as beating a boss does. Mid-round, the cards held go to the
 ## discard pile and a new hand is dealt; between rounds, they apply from the next round.
 func set_slots_and_hand(slot_count: int, hand_size: int) -> void:
 	if busy:
