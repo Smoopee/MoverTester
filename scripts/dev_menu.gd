@@ -296,6 +296,12 @@ func _build_items_tab(box: VBoxContainer) -> void:
 	_button(row, "+50", _add_score.bind(50))
 	_button(row, "To target", _add_score.bind(-2))
 	_button(row, "Set to 0", _add_score.bind(-1))
+	row = _row(box)
+	for share: float in [0.1, 0.4, 1.0, 3.0]:
+		_button(row, "Pop %d%%" % roundi(share * 100), func() -> void:
+			var gained := maxi(roundi(game.score_target * share), 1)
+			game.pop_turn_score(gained, gained, 1)
+			_did("Popped a turn score of %d (%d%% of the target)" % [gained, roundi(share * 100)]))
 
 	_heading(box, "Discards")
 	row = _row(box)

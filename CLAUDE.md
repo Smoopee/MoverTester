@@ -109,6 +109,13 @@ round's target (`Score.target`) grows each round, and more in a boss round. Meet
 crumbs (`Score.crumbs`), and missing it in a boss round ends the run (`_short_of_boss_target`). The
 score trinkets are BUTTER PAWS, HARD HEAD, SHOW-OFF, JOYRIDE and DAREDEVIL.
 
+Score shows as **popups** (`scripts/score_popup.gd` `ScorePopup`): points pop up on the cell that
+made them (`main.gd` `_add_points`, which every point source goes through), mult from trinkets over
+the mouse (`_pop_mult`), and the banked turn over the board (`pop_turn_score`). Each popup's
+intensity grows with the score (a move's points on a log scale, a turn's against the round's target):
+bigger, hotter in color, shaking, with sparks and a ring at the top. No popups when
+`Board.animate` is off. The dev menu's Items tab has Pop buttons to try the sizes.
+
 **Skills** (`Items.Skill`, `Run.skills`) are always-on abilities for the rest of the run, held in
 `Items.SKILL_SLOTS` (4) slots shown above the card slots (`main.gd` `_refresh_skills`). WARP makes
 every step wrap round the board's edges like a WRAP slot (`Board.warp`); EFFICIENT gives +1 discard
@@ -148,6 +155,8 @@ pays `Boss.WIN_CRUMBS`, adds a card slot and a card in hand, and offers a free t
   this turn there is.
 - `scripts/score.gd` — `Score`: the round score's tuning (points, mult, score trinket numbers), the
   per-round `target()` and the bonus `crumbs()` it pays.
+- `scripts/score_popup.gd` — `ScorePopup`: a floating score number (`spawn()`), drawn more intensely
+  the higher the score.
 - `scripts/hazard.gd` — `Hazard`: one shock pylon or flamethrower: `kind`, `cell`, `dir`, `period`
   and `timer` (turns until it goes off).
 - `scripts/cat.gd` — `Cat`: one roaming cat's cell and this turn's `path` (`steps` cells), and

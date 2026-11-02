@@ -1004,6 +1004,11 @@ func _cell_center(cell: Vector2) -> Vector2:
 	return (cell + Vector2(0.5, 0.5)) * CELL
 
 
+## Where a cell's center is on screen (a global position).
+func cell_global_center(cell: Vector2i) -> Vector2:
+	return get_global_transform() * (_view * _cell_center(Vector2(cell)))
+
+
 ## Draws the cells that change how the mouse moves: chasms and their bridges, floorboards and the gaps
 ## they leave, conveyors, mouse holes, glue, jump pads and pressure plates.
 func _draw_floor() -> void:
