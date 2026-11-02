@@ -183,6 +183,7 @@ func _ready() -> void:
 	var touch := DisplayServer.is_touchscreen_available()
 	if touch:
 		_add_touch_button("Bug", bug_report.open)
+		add_child(TouchTips.new())
 	# True in the editor and debug exports, false in release exports.
 	if OS.is_debug_build():
 		var dev_menu := DevMenu.new()
@@ -1077,7 +1078,7 @@ func _refresh_pouch() -> void:
 		var button := Button.new()
 		button.text = info[0]
 		button.icon = ItemIcon.consumable(run.pouch[i], 16)
-		button.tooltip_text = "%s Click to use." % info[1]
+		button.tooltip_text = "%s %s to use." % [info[1], "Tap" if DisplayServer.is_touchscreen_available() else "Click"]
 		button.focus_mode = Control.FOCUS_NONE
 		button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 		button.disabled = busy or win_panel.visible
