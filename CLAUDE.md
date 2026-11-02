@@ -22,49 +22,62 @@ before a GAMBLE slot's random move). `main.gd` `_update_preview` plays the turn 
 that records the mouse's `trail`, and puts back the card tints, status line, THICK FUR and log after.
 Anything that changes the cards, slots or board calls `refresh_preview()` (the dev menu's `_did` does).
 
-The board has mouse traps, **walls** and roaming **cats**. Walls are segments on cell edges, laid
-in short runs that can turn corners (`main.gd` `_place_walls`, which rejects any run that would cut
-a cell off). Nothing walks, slides or jumps through a wall, except the mouse during a turn of the
-SQUEEZE consumable. Each cat shows the path it will walk this turn; moving onto a cat or its path
-catches the mouse. After the mouse moves, the cats walk their paths and plan new ones, which never
-cover the mouse's cell, the cheese or a trap.
+**Obstacles** fall into five groups (`scripts/obstacle.gd` `Obstacle`: `Kind`, `Group`, `GROUP_OF`,
+`GROUP_INFO`). A new obstacle gets a `Kind` and a group there, and the dev menu's brush dropdown
+lists its brushes under that group (`dev_menu.gd` `BRUSH_OBSTACLES`).
 
-Later rounds add **chasms** (`main.gd` `_place_chasms`, `board.chasms`): runs of cells a cell wide
-that can turn corners, never on the mouse, cheese or a trap and never touching another chasm. Like a
-gap, nothing can move onto a chasm cell but jumps pass over it, so LEAP crosses one. A chasm that
-would cut a cell off gets a **bridge** (`bridges`, plain floor) on a straight stretch, or is left
-out; others get one with `BRIDGE_CHANCE`. `Board.is_blocked` covers gaps, chasms and the machines below.
+Glue, mouse holes, conveyors, floorboards and jump pads are **floor tiles** (`main.gd` `_place_floor`):
+at most one per cell, never on the mouse, cheese, a trap or a crumb, acting on the cell a move ends on
+unless noted. `Board.is_blocked` covers gaps, chasms and machines (nothing moves onto them; jumps
+pass over).
 
-Later rounds add **shock pylons** and **flamethrowers** (`scripts/hazard.gd` `Hazard`, `board.hazards`,
-`main.gd` `_place_hazards`). Each is a machine on a cell that nothing can move onto (jumps pass over),
-placed only where it cuts no cell off, and shows a countdown. At the end of each turn, after the cats
-walk, `Board.fire_hazards` counts them all down; one that hits 0 goes off and starts over from its
-`period` (2-4 turns). A pylon shocks the 8 cells around it, walls or not; a flamethrower shoots a jet
-up to `Hazard.FLAME_REACH` (3) cells the way it points, stopped by walls, doors, shut gates, crates
-and other machines (`Board.blast_cells`). Only where the mouse ends the turn counts: in a blast, it's
-caught (`blasted_by`, part of `is_caught()`). On the turn a machine shows 1 its blast cells are
-shaded strongly (`in_blast`), and the preview ends in a red cross there.
-
-Later rounds add **floor tiles** (`main.gd` `_place_floor`), at most one per cell and never on the
-mouse, cheese, a trap or a crumb. They act on the cell a move ends on, except where noted:
+### Tile denial: spoil one cell
+- **Mouse traps**: moving onto one catches the mouse (`is_trapped()`). Jumps pass over them.
 - **Glue**: the mouse sticks for the rest of the turn (`Board.stuck`; `lock_in` fizzles the cards
   left). Slides stop on it; jumps pass over it.
+- **Creaky floorboards**: break into a gap (`broken`) once the mouse walks, slides or jumps off.
+  Nothing can move onto a gap, but jumps pass over it. Only placed where breaking every one still
+  leaves all cells reachable.
+
+### Structure denial: shape the board
+- **Walls**: segments on cell edges, laid in short runs that can turn corners (`main.gd`
+  `_place_walls`, which rejects any run that would cut a cell off). Nothing walks, slides or jumps
+  through a wall, except the mouse during a turn of the SQUEEZE consumable.
+- **Chasms** (`main.gd` `_place_chasms`, `board.chasms`): runs of cells a cell wide that can turn
+  corners, never on the mouse, cheese or a trap and never touching another chasm. Like a gap, nothing
+  can move onto a chasm cell but jumps pass over it, so LEAP crosses one. A chasm that would cut a
+  cell off gets a **bridge** (`bridges`, plain floor) on a straight stretch, or is left out; others
+  get one with `BRIDGE_CHANCE`.
+
+### Multi-tile denial: threaten several cells, changing each turn
+- **Cats**: each shows the path it will walk this turn; moving onto a cat or its path catches the
+  mouse. After the mouse moves, the cats walk their paths and plan new ones, which never cover the
+  mouse's cell, the cheese or a trap.
+- **Shock pylons** and **flamethrowers** (`scripts/hazard.gd` `Hazard`, `board.hazards`, `main.gd`
+  `_place_hazards`). Each is a machine on a cell that nothing can move onto (jumps pass over), placed
+  only where it cuts no cell off, and shows a countdown. At the end of each turn, after the cats walk,
+  `Board.fire_hazards` counts them all down; one that hits 0 goes off and starts over from its
+  `period` (2-4 turns). A pylon shocks the 8 cells around it, walls or not; a flamethrower shoots a jet
+  up to `Hazard.FLAME_REACH` (3) cells the way it points, stopped by walls, doors, shut gates, crates
+  and other machines (`Board.blast_cells`). Only where the mouse ends the turn counts: in a blast, it's
+  caught (`blasted_by`, part of `is_caught()`). On the turn a machine shows 1 its blast cells are
+  shaded strongly (`in_blast`), and the preview ends in a red cross there.
+
+### Movement options: carry the mouse farther
+- **Jump pads** (`pads`, cell -> offset): throw the mouse 2-4 cells the way the pad's arrow points,
+  as a jump (`Board.jump_landing`). Only placed where the whole throw is clear and doesn't land on a trap.
 - **Mouse holes**, in linked pairs (`holes[0]` with `holes[1]`, ...): pop out of the other one.
   Slides stop on one (and go down it); jumps pass over it.
 - **Conveyor belts**: carry the mouse a cell the belt's way, and on along the belt. Never placed
   to push into a wall, off the board or onto a trap.
-- **Creaky floorboards**: break into a gap (`broken`) once the mouse walks, slides or jumps off.
-  Nothing can move onto a gap, but jumps pass over it. Only placed where breaking every one still
-  leaves all cells reachable.
-- **Jump pads** (`pads`, cell -> offset): throw the mouse 2-4 cells the way the pad's arrow points,
-  as a jump (`Board.jump_landing`). Only placed where the whole throw is clear and doesn't land on a trap.
 
-Holes, conveyors and jump pads chain (`Board._ride`); the pathfinding ignores them (and glue).
+These chain (`Board._ride`); the pathfinding ignores them (and glue).
 
-Later rounds also add **locked doors** and **switches** (`main.gd` `_place_locks`). Each door or gate
-sits in a short run of wall, kept from `LOCK_TRIES` tries as the one that makes the way to the cheese
-longest while it's shut, and like walls it never cuts a cell off: opening it is a shortcut. Doors and
-shut gates are walls to everything (`Board.is_barrier`), and the turn limit counts them as shut.
+### Multi-step puzzles: a shut shortcut
+Locked doors and switches (`main.gd` `_place_locks`). Each door or gate sits in a short run of wall,
+kept from `LOCK_TRIES` tries as the one that makes the way to the cheese longest while it's shut, and
+like walls it never cuts a cell off: opening it is a shortcut. Doors and shut gates are walls to
+everything (`Board.is_barrier`), and the turn limit counts them as shut.
 - **Keys and locked doors** (`keys`, `doors`): walking or sliding over a key picks it up
   (`keys_held`, shown next to the HUD, for this round only). Walking or sliding into a door with a
   key uses the key and opens the door for good (`Board._unlock`). Jumps stop short of doors.
@@ -76,10 +89,13 @@ shut gates are walls to everything (`Board.is_barrier`), and the turn limit coun
   next to its gate. Cats never walk through gates, open or not, or onto crates.
 
 **Difficulty** (`scripts/difficulty.gd`) rises with the round number: the first two rounds are a
-small board (8x8) with no obstacles, then the grid grows a cell a round up to 20x20 and traps and
-walls are added, and the other obstacles join one at a time: cats (round 4), glue (5), jump pads
-(6), mouse holes (7), conveyors (8), locked doors (9), floorboards (10), switches (11), chasms (12),
-shock pylons (13) and flamethrowers (14). Every round has a turn limit, set from the mouse-to-cheese
+small board (8x8) with no obstacles. The grid grows by `Difficulty.GRID_GROWTH` (2) cells a side
+after each boss round (8, 10, 12, ... up to 20x20 from round 19). Traps and wall runs come from
+round 3, a set number per board cell (`TRAPS_PER_CELL`, `WALLS_PER_CELL`), so they step up with the
+board. The other obstacles join one at a time on the rounds between boss rounds, spread over the
+21-round run: cats (round 4), glue (5), jump pads (7), mouse holes (8), conveyors (10), locked doors
+(11), floorboards (13), switches (14), chasms (16), shock pylons (17) and flamethrowers (19), each
+then growing every few rounds to its max, which the later ones reach in endless mode. Every round has a turn limit, set from the mouse-to-cheese
 path length around the walls and traps (`Board.distances_from`) with a few spare turns that shrink
 over the run.
 
@@ -91,8 +107,11 @@ up to 10) grow only by beating a boss: each adds `Boss.SLOTS_GAINED` and `Boss.H
 for the rest of the run, from the next round (`main.gd` `_boss_upgrade`). `_build_slots` rebuilds the
 slots at the start of a turn and shrinks the cards so the slots and the hand each fit their row.
 
-Rounds chain into an endless **run**: the deck, crumbs, trinkets, pouch, slots and hand size carry over until a trap
-or a cat catches the mouse (or a pylon or flamethrower), or the turns run out, or a boss round ends short of its score target (`main.gd` `lost()`), which starts a new run. A won round pays crumbs (`WIN_CRUMBS` + unused discards + the score bonus, plus
+Rounds chain into a **run**: the deck, crumbs, trinkets, pouch, slots and hand size carry over until a trap
+or a cat catches the mouse (or a pylon or flamethrower), or the turns run out, or a boss round ends short of its score target (`main.gd` `lost()`), which starts a new run.
+Beating round `Run.GOAL_ROUNDS` (21, a boss round) wins the run (`main.gd` `won_run()`): the win
+panel offers Endless, which goes on to the shop and sets `Run.endless` (the difficulty keeps
+climbing to its caps), or New Run. The HUD shows "Round N of 21", then "Endless round N". A won round pays crumbs (`WIN_CRUMBS` + unused discards + the score bonus, plus
 crumbs picked up on the board), then opens the **shop**. It sells trinkets (passive for the run),
 skills, consumables (held in the pouch, used once) and card stamps (a slot effect stuck on one card).
 The trinket and skill rows each have a Reroll button (`shop.gd` `_reroll`): the first reroll in a
@@ -174,6 +193,8 @@ pays `Boss.WIN_CRUMBS`, adds a card slot and a card in hand, and offers a free t
   the higher the score.
 - `scripts/hazard.gd` — `Hazard`: one shock pylon or flamethrower: `kind`, `cell`, `dir`, `period`
   and `timer` (turns until it goes off).
+- `scripts/obstacle.gd` — `Obstacle`: the obstacle `Kind`s, the five `Group`s they fall into
+  (`GROUP_OF`, `GROUP_INFO` name / description) and `kinds_in(group)`.
 - `scripts/cat.gd` — `Cat`: one roaming cat's cell and this turn's `path` (`steps` cells), and
   `plan()`, which picks the next path. A `hunter` (the Alley King) heads for the mouse instead.
 - `scripts/boss.gd` — `Boss`: the `Kind` enum, `INFO` (name / description), and the boss tuning
@@ -240,5 +261,24 @@ A new `class_name` script isn't visible to the parse check until Godot refreshes
 `"/c/Program Files/Godot/godot.exe" --headless --path . --import`.
 
 A PostToolUse hook (`.claude/hooks/godot-check.ps1`) parse-checks every `.gd` file Claude edits.
+Another (`.claude/hooks/sheet-reminder.ps1`) reminds Claude to update the design sheet (below) after
+an edit to `difficulty.gd` or `score.gd`, or to a `const` in `boss.gd`, `run.gd`, `main.gd` or `board.gd`.
 Skills: `add-card-effect`, `balance-sim`, `ship` (user-only: commit → PR → merge). Agents:
 `gdscript-reviewer`, `card-designer`.
+
+## Design sheet
+The Google Sheet **Mouse and Cheese**
+(https://docs.google.com/spreadsheets/d/1Os7GqZFWxtAs7zuOeQZ3AQ9smqf0qJ56Mkpwy8LJ-7s/edit) mirrors
+the game's tuning, and must be updated in the same change as the code, through the Google Sheets
+connector:
+- **Rules** tab: every tuning value (blue) with the constant it comes from, and the obstacle
+  schedule (first round, count, growth, max) in the five obstacle groups.
+- **Rounds** tab: one row per round to `Run.GOAL_ROUNDS` plus a few endless rounds, all formulas
+  over the Rules tab, with a "What's new" note per round and notes on how a round works under it.
+
+A changed value goes in its Rules cell. A change to how a value is used (a formula in
+`Difficulty`, `Score.target`, the payout in `_end_round`, ...) also changes the Rounds formula
+that copies it, and anything the "What's new" or round notes say about it. A new tuning constant
+or obstacle gets a Rules row and, if it varies by round, a Rounds column. Check the numbers against
+the game afterwards (e.g. `Difficulty.describe` and `Score.target` for each round in a throwaway
+`extends SceneTree` script run with `--script`).
