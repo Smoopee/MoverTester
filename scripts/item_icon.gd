@@ -145,6 +145,37 @@ func _draw_trinket(trinket_id: int, dark: Color) -> void:
 				_ellipse(Vector2(-3, y), Vector2(1.6, 3), -0.6, color)
 				_ellipse(Vector2(3, y), Vector2(1.6, 3), 0.6, color)
 			_ellipse(Vector2(0, -8.5), Vector2(1.6, 3), 0.0, color)
+		Items.Trinket.BUTTER_PAWS:
+			# A pat of butter, with speed lines trailing it.
+			_polygon([Vector2(-3, -2), Vector2(4, -6), Vector2(11, -2), Vector2(4, 2)], color.lightened(0.4))
+			_polygon([Vector2(-3, -2), Vector2(4, 2), Vector2(4, 7), Vector2(-3, 3)], color)
+			_polygon([Vector2(4, 2), Vector2(11, -2), Vector2(11, 3), Vector2(4, 7)], color.darkened(0.2))
+			for y: float in [-4.0, 1.0, 6.0]:
+				_line([Vector2(-11, y), Vector2(-5.5, y)], 1.6, color)
+		Items.Trinket.HARD_HEAD:
+			# A wall, and a burst where something bonked it.
+			_rect(Rect2(6, -11, 4, 22), color)
+			for i in 5:
+				var d := Vector2.from_angle(PI / 2 + PI / 4 + i * PI / 8)
+				_line([Vector2(3, 0) + d * 4, Vector2(3, 0) + d * 10], 1.8, color)
+			_circle(Vector2(3, 0), 2.2, color)
+		Items.Trinket.SHOW_OFF:
+			# A five-pointed star.
+			var points: Array[Vector2] = []
+			for i in 10:
+				points.append(Vector2.from_angle(-PI / 2 + i * PI / 5) * (10.5 if i % 2 == 0 else 4.5))
+			_polygon(points, color)
+		Items.Trinket.JOYRIDE:
+			# Down one mouse hole and out the other: an arrow arcing between two holes.
+			_ellipse(Vector2(-7, 7.5), Vector2(4, 2.2), 0.0, color)
+			_ellipse(Vector2(7, 7.5), Vector2(4, 2.2), 0.0, color)
+			_line(_arc(Vector2(0, 3), 7, -PI, -PI * 0.12, 14), 2, color)
+			_polygon([Vector2(3.5, 1.5), Vector2(10.5, 0.5), Vector2(7.5, 6)], color)
+		Items.Trinket.DAREDEVIL:
+			# A warning sign.
+			_polygon([Vector2(0, -10.5), Vector2(11, 9), Vector2(-11, 9)], color)
+			_line([Vector2(0, -3.5), Vector2(0, 3)], 2.2, dark)
+			_circle(Vector2(0, 6), 1.3, dark)
 
 
 func _draw_skill(skill_id: int, dark: Color) -> void:

@@ -3,7 +3,11 @@ extends RefCounted
 ## What the shop sells: trinkets (passive for the rest of the run), skills (always on, held in the
 ## SKILL_SLOTS slots above the card slots), consumables (held in the pouch, used once) and card stamps.
 
-enum Trinket { SPARE_PAWS, LUCKY_TAIL, THICK_FUR, CRUMB_MAGNET, PIGGY_BANK, BOUNTIFUL_HARVEST }
+enum Trinket {
+	SPARE_PAWS, LUCKY_TAIL, THICK_FUR, CRUMB_MAGNET, PIGGY_BANK, BOUNTIFUL_HARVEST,
+	# Score trinkets (see Score).
+	BUTTER_PAWS, HARD_HEAD, SHOW_OFF, JOYRIDE, DAREDEVIL,
+}
 enum Consumable { FRESH_BREEZE, CALM, NEW_PAWS, CHEESE_BAIT, SQUEEZE }
 enum Skill { WARP, EFFICIENT }
 
@@ -18,6 +22,15 @@ const TRINKETS := {
 	Trinket.CRUMB_MAGNET: ["CRUMB MAGNET", "After each move, the mouse also picks up crumbs right next to it (up, down, left or right).", 6],
 	Trinket.PIGGY_BANK: ["PIGGY BANK", "Each win pays +1 crumb per 5 you hold (up to +5).", 7],
 	Trinket.BOUNTIFUL_HARVEST: ["BOUNTIFUL HARVEST", "Crumbs picked up on the board are worth +2.", 7],
+	Trinket.BUTTER_PAWS: ["BUTTER PAWS", "Score: +%d points for each cell the mouse slides." % Score.BUTTER_PAWS_POINTS, 6],
+	Trinket.HARD_HEAD: ["HARD HEAD",
+		"Score: +%d mult each time the mouse bumps into a wall, the edge or anything else in its way." % Score.HARD_HEAD_MULT, 7],
+	Trinket.SHOW_OFF: ["SHOW-OFF",
+		"Score: +%d mult for each slot effect and stamp the cards play." % Score.SHOW_OFF_MULT, 7],
+	Trinket.JOYRIDE: ["JOYRIDE",
+		"Score: +%d mult for each mouse hole, conveyor cell or jump pad the mouse rides." % Score.JOYRIDE_MULT, 6],
+	Trinket.DAREDEVIL: ["DAREDEVIL",
+		"Score: x%d mult when the cards leave the mouse next to a trap, a cat or a cat's path." % Score.DAREDEVIL_TIMES, 8],
 }
 ## Name, description and price of each consumable.
 const CONSUMABLES := {

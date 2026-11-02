@@ -291,6 +291,12 @@ func _build_items_tab(box: VBoxContainer) -> void:
 	_button(row, "+100", _add_crumbs.bind(100))
 	_button(row, "Set to 0", _add_crumbs.bind(-1))
 
+	_heading(box, "Score")
+	row = _row(box)
+	_button(row, "+50", _add_score.bind(50))
+	_button(row, "To target", _add_score.bind(-2))
+	_button(row, "Set to 0", _add_score.bind(-1))
+
 	_heading(box, "Discards")
 	row = _row(box)
 	_button(row, "+5", func() -> void:
@@ -665,6 +671,19 @@ func _add_crumbs(amount: int) -> void:
 	game.run.crumbs = 0 if amount == -1 else game.run.crumbs + amount
 	game.refresh_ui()
 	_did("Crumbs set to %d" % game.run.crumbs)
+
+
+## Adds amount to the round's score, sets it to 0 for -1, or raises it to the target for -2.
+func _add_score(amount: int) -> void:
+	match amount:
+		-1:
+			game.round_score = 0
+		-2:
+			game.round_score = maxi(game.round_score, game.score_target)
+		_:
+			game.round_score += amount
+	game.refresh_ui()
+	_did("Score set to %d / %d" % [game.round_score, game.score_target])
 
 
 func _set_trinket(on: bool, trinket: Items.Trinket) -> void:

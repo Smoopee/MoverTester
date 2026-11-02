@@ -8,6 +8,7 @@ extends SceneTree
 ## plays every round as round N of a fresh run instead. Boss rounds are off unless --boss names one
 ## (alley_king, runaway_cheese, kitchen_light): then every round is that boss, each on a fresh run.
 ## --slots N and --hand N start every run with that many card slots and cards in hand (boss wins add more, but bosses are off by default).
+## --trinkets a,b starts every run with those trinkets (show_off, daredevil, ...), to see what they do to the score.
 
 const MAX_TURNS := 200
 
@@ -20,6 +21,8 @@ var fixed_round := 0
 ## Card slots and hand size each run starts with, or 0 for the game's own (Run.START_SLOTS, ...).
 var slot_count := 0
 var hand_size := 0
+## Items.Trinket values each run starts with.
+var trinkets: Array[int] = []
 ## Rounds that had a chest, and chests opened.
 var chest_rounds := 0
 var chests_opened := 0
@@ -36,7 +39,7 @@ var blasted := 0
 ## Rounds lost to the turn limit.
 var out_of_time := 0
 ## Per round number: [rounds played, won, caught in a trap, caught by a cat, out of time, turns in won
-## rounds, caught by a pylon or flamethrower].
+## rounds, caught by a pylon or flamethrower, score in won rounds, won rounds that met the score target].
 var round_stats := {}
 ## Crumbs earned in rounds that reached the cheese: the win reward, unused discards and pickups.
 var won_crumbs := 0
@@ -72,6 +75,14 @@ func _initialize() -> void:
 				slot_count = clampi(args[i + 1].to_int(), 1, Run.MAX_SLOTS)
 			"--hand":
 				hand_size = clampi(args[i + 1].to_int(), 1, Run.MAX_HAND_SIZE)
+			"--trinkets":
+				for trinket_name in args[i + 1].split(","):
+					var trinket: int = Items.Trinket.get(trinket_name.to_upper(), -1)
+					if trinket == -1:
+						printerr("Unknown trinket %s, expected some of %s" % [trinket_name, Items.Trinket.keys()])
+						quit(1)
+						return
+					trinkets.append(trinket)
 	for effect in CardSlot.Effect.values():
 		effect_stats[effect] = [0, 0, 0, 0]
 	_run.call_deferred()
@@ -85,7 +96,7 @@ func _run() -> void:
 	board.animate = false
 	main.bosses_enabled = false
 	main.force_boss = boss
-	if boss != -1 or fixed_round > 0 or slot_count > 0 or hand_size > 0:
+	if boss != -1 or fixed_round > 0 or slot_count > 0 or hand_size > 0 or not trinkets.is_empty():
 		_new_run()
 	for r in rounds:
 		if r > 0:
@@ -104,6 +115,9 @@ func _run() -> void:
 ## Starts a run, skipping ahead to fixed_round if one is set.
 func _new_run() -> void:
 	main.new_run()
+	if not trinkets.is_empty():
+		main.run.trinkets.assign(trinkets)
+		main.refresh_ui()
 	if fixed_round > 1:
 		main.run.round_number = fixed_round - 1
 		main.new_round()
@@ -116,7 +130,7 @@ func _play_round() -> void:
 	var crumbs_before: int = main.run.crumbs
 	var number: int = main.run.round_number
 	if number not in round_stats:
-		round_stats[number] = [0, 0, 0, 0, 0, 0, 0]
+		round_stats[number] = [0, 0, 0, 0, 0, 0, 0, 0, 0]
 	var tally: Array = round_stats[number]
 	tally[0] += 1
 	if not board.chests.is_empty():
@@ -158,6 +172,9 @@ func _play_round() -> void:
 	else:
 		tally[1] += 1
 		tally[5] += main.turn
+		tally[7] += main.round_score
+		if main.round_score >= main.score_target:
+			tally[8] += 1
 		round_turns.append(main.turn)
 		won_crumbs += main.run.crumbs - crumbs_before
 		crumbs_picked_up += main.round_crumbs
@@ -294,13 +311,17 @@ func _report_rounds() -> void:
 	var numbers := round_stats.keys()
 	numbers.sort()
 	# The board goes last: its description grows with the obstacles.
-	print("\n%-6s %6s %6s %6s %6s %6s %6s %6s  %s" % ["Round", "played", "won%", "trap%", "cat%", "zap%",
-		"time%", "turns", "Board"])
+	print("\n%-6s %6s %6s %6s %6s %6s %6s %6s %6s %6s %6s  %s" % ["Round", "played", "won%", "trap%", "cat%",
+		"zap%", "time%", "turns", "score", "target", "met%", "Board"])
 	for number: int in numbers:
 		var tally: Array = round_stats[number]
 		var played: int = tally[0]
-		print("%-6d %6d %5.1f%% %5.1f%% %5.1f%% %5.1f%% %5.1f%% %6s  %s" % [number, played,
+		# Score is the mean in won rounds, and met% the share of won rounds that met the target.
+		print("%-6d %6d %5.1f%% %5.1f%% %5.1f%% %5.1f%% %5.1f%% %6s %6s %6d %6s  %s" % [number, played,
 			100.0 * tally[1] / played, 100.0 * tally[2] / played, 100.0 * tally[3] / played,
 			100.0 * tally[6] / played, 100.0 * tally[4] / played,
 			"-" if tally[1] == 0 else "%.1f" % (float(tally[5]) / tally[1]),
+			"-" if tally[1] == 0 else "%.0f" % (float(tally[7]) / tally[1]),
+			Score.target(number, boss != -1),
+			"-" if tally[1] == 0 else "%.0f%%" % (100.0 * tally[8] / tally[1]),
 			Difficulty.describe(number)])

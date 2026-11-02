@@ -14,6 +14,11 @@ signal door_unlocked(edge: Vector3i)
 ## A cell was left-clicked, side being the edge of the cell nearest the click. The F2 dev menu uses
 ## it to edit the board.
 signal cell_clicked(cell: Vector2i, side: Card.Dir)
+## The mouse finished a move: a step, a slide or a jump of cells cells, one cell of a ride on a hole,
+## conveyor or jump pad, or a BUMP where something in the way kept it put. For the score.
+signal mouse_moved(motion: Motion, cells: int)
+
+enum Motion { STEP, SLIDE, JUMP, RIDE, BUMP }
 
 ## Cells along each side of the biggest board. Early rounds use a smaller one (see Difficulty.grid).
 const MAX_GRID := 20
@@ -623,7 +628,7 @@ func step(dir: Card.Dir, wrap := false) -> bool:
 		var bump := Vector2(mouse_cell) + Vector2(offset) * 0.25
 		tween.tween_property(self, "mouse_pos", bump, STEP_TIME / 2)
 		tween.tween_property(self, "mouse_pos", Vector2(mouse_cell), STEP_TIME / 2)
-	return await _finish(tween, start)
+	return await _finish(tween, start, [], Motion.STEP)
 
 
 ## Moves the mouse in a straight line until it hits a wall, a gap, a crate, a trap, a cat's path, glue,
@@ -643,7 +648,7 @@ func slide(dir: Card.Dir) -> bool:
 		passed.append(mouse_cell)
 	var tween := create_tween().set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	tween.tween_property(self, "mouse_pos", Vector2(mouse_cell), SLIDE_CELL_TIME * passed.size() + STEP_TIME)
-	return await _finish(tween, start, passed)
+	return await _finish(tween, start, passed, Motion.SLIDE)
 
 
 ## Hops the mouse by offset, passing over the cells in between. Lands as far as the edge and the walls
@@ -652,7 +657,7 @@ func jump(offset: Vector2i, dir: Card.Dir) -> bool:
 	facing = dir
 	var start := mouse_cell
 	mouse_cell = jump_landing(mouse_cell, offset)
-	return await _finish(_hop_tween(), start)
+	return await _finish(_hop_tween(), start, [], Motion.JUMP)
 
 
 ## Tweens the mouse to its cell in a hop.
@@ -715,12 +720,18 @@ func is_deadly(cell: Vector2i) -> bool:
 	return cell in traps or _cat_at(cell) != null
 
 
-## Ends a move that started on start: waits for its tween, breaks the floorboards it left, picks up
-## crumbs on the cells passed and the cell landed on, then lets holes and conveyors carry the mouse on
-## (see _ride). Returns true if the round is over: the mouse is on the cheese or caught in a trap or
-## by a cat, which then pounces on it.
-func _finish(tween: Tween, start: Vector2i, passed: Array[Vector2i] = []) -> bool:
+## Ends a move that started on start: waits for its tween, reports it (mouse_moved), breaks the
+## floorboards it left, picks up crumbs on the cells passed (a slide's) and the cell landed on, then
+## lets holes and conveyors carry the mouse on (see _ride). Returns true if the round is over: the
+## mouse is on the cheese or caught in a trap or by a cat, which then pounces on it.
+func _finish(tween: Tween, start: Vector2i, passed: Array[Vector2i], motion: Motion) -> bool:
 	await _settle(tween)
+	if mouse_cell == start:
+		mouse_moved.emit(Motion.BUMP, 0)
+	else:
+		# A step that wraps round the edge is still one cell.
+		mouse_moved.emit(motion, passed.size() if motion == Motion.SLIDE
+			else 1 if motion == Motion.STEP else _distance(start, mouse_cell))
 	passed.append(mouse_cell)
 	for cell: Vector2i in [start] + passed:
 		if cell != mouse_cell and cell in floorboards:
@@ -780,9 +791,12 @@ func _arrive(cells: Array[Vector2i]) -> bool:
 ## another cell. Then glue there sticks it for the rest of the turn. Returns true if the round is over.
 func _ride() -> bool:
 	var popped_out := false
+	# Cells ridden from, each reported to mouse_moved once, so a loop doesn't score round and round.
+	var ridden: Array[Vector2i] = []
 	# A loop of conveyors would carry the mouse round forever.
 	for i in grid * grid:
 		var exit := _hole_exit(mouse_cell)
+		var from := mouse_cell
 		var tween: Tween
 		if exit != mouse_cell and not popped_out:
 			BugReport.note("  Down the mouse hole at %s, out at %s" % [mouse_cell, exit])
@@ -807,6 +821,9 @@ func _ride() -> bool:
 		else:
 			break
 		await _settle(tween)
+		if from not in ridden:
+			ridden.append(from)
+			mouse_moved.emit(Motion.RIDE, 1)
 		if await _arrive([mouse_cell]):
 			return true
 	stuck = mouse_cell in glue
