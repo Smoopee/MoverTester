@@ -151,21 +151,27 @@ Beating round `Run.GOAL_ROUNDS` (21, a boss round) wins the run (`main.gd` `won_
 panel offers Endless, which goes on to the shop and sets `Run.endless` (the difficulty keeps
 climbing to its caps), or New Run. The HUD shows "Round N of 21", then "Endless round N". A won round pays crumbs (`WIN_CRUMBS` + unused discards + the score bonus, plus
 crumbs picked up on the board), then opens the **shop**. It sells trinkets (passive for the run),
-skills, consumables (held in the pouch, used once), card stamps (a slot effect stuck on one card) and
-card materials.
+skills, consumables (held in the pouch, used once), and card upgrades: card stamps (a slot effect
+stuck on one card) and card materials share one row, 2 picks from both pools together (`shop.gd` `_row_of`).
 The trinket and skill rows each have a Reroll button (`shop.gd` `_reroll`): the first reroll in a
 visit costs `Shop.REROLL_PRICE` (5) crumbs and each one after costs 5 more, counted across both rows. A
 stamped card plays its slot's effect first, then its stamp (`main.gd` `_play`): a BURN slot with a
 SLIDE stamp moves 3 cells, then slides. A burned card stays burned whatever its stamp. Some effects
 are stamps only, never rolled on a slot (`CardSlot.STAMP_ONLY`). Some are set by clicking the stamp
 band on a card in play (`Card.SET_STAMPS`, stored on the `CardData`), and STEADY makes the card ignore
-its slot: read a slot's effect on a card through `main.gd` `_slot_effect` / `_play_dir`.
+its slot: read a slot's effect on a card through `main.gd` `_slot_effect` / `_play_dir`. TUNNEL
+jumps 2 cells through walls, doors and gates (`Board.jump` `through_walls`), and SCURRY moves twice
+when its card is the first of the turn to play.
 
 **Stamps change how a card moves; materials change what it pays.** A card's **material**
 (`Items.CardMaterial`, `Items.MATERIALS` name / description / price / color, stored on the `CardData`)
 pays out each time the card plays, whatever its slot or stamp does (`main.gd` `_play_material`, called
 from `_play_cards` for each card that plays, never in the preview): WOOD adds `Score.WOOD_POINTS` (2)
-points, SHINY `Score.SHINY_MULT` (2) mult and GOLD `Items.GOLD_CRUMBS` (1) crumb. A card has at most
+points, SHINY `Score.SHINY_MULT` (2) mult and GOLD `Items.GOLD_CRUMBS` (1) crumb. COPPER adds
+`Score.COPPER_POINTS` (1) points, `Score.COPPER_GROWTH` (1) more each time it has played this run
+(`CardData.copper_plays`, reset when the card gets another material), and PAPER `Score.PAPER_POINTS`
+(1) a cell the card moved the mouse (`main.gd` `card_cells`). STONE is the exception: it pays
+`Score.STONE_MULT` (3) mult when you Lock In with it still in the hand (`_pay_stones`). A card has at most
 one stamp and one material; buying a new one replaces the old. Each material gives the card its own
 face (`Card.FACES`, patterned in `Card._draw_material`). A new effect that only changes the score is a
 material, not a stamp.
@@ -304,7 +310,8 @@ The sim lets runs go on, so it prints win/loss rates per round number (the diffi
 also shows the bot's mean score in won rounds against the target. The bot plays for the cheese, not the
 score, so its score is a floor. `--trinkets butter_pat,ride_ticket` starts every run with those
 trinkets, `--skills show_off,daredevil` with those skills, and `--materials wood,gold` makes the
-starting deck's cards those materials, taking turns.
+starting deck's cards those materials, taking turns. The bot plays few cards a turn, so a STONE deck
+scores far more for it than for a player who fills the slots.
 
 A new `class_name` script isn't visible to the parse check until Godot refreshes its class cache:
 `"/c/Program Files/Godot/godot.exe" --headless --path . --import`.

@@ -10,7 +10,7 @@ extends SceneTree
 ## --slots N and --hand N start every run with that many card slots and cards in hand (boss wins add more, but bosses are off by default).
 ## --trinkets a,b starts every run with those trinkets (butter_pat, ride_ticket, ...), and --skills a,b
 ## with those skills (show_off, daredevil, ...), to see what they do to the score. --materials a,b makes
-## the starting deck's cards those materials (wood, shiny, gold), taking turns.
+## the starting deck's cards those materials (wood, shiny, gold, copper, paper, stone), taking turns.
 
 const MAX_TURNS := 200
 

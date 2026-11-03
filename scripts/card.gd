@@ -58,6 +58,9 @@ const FACES := {
 	Items.CardMaterial.WOOD: Color("e2bf8e"),
 	Items.CardMaterial.SHINY: Color("e2f1fb"),
 	Items.CardMaterial.GOLD: Color("f2d16a"),
+	Items.CardMaterial.COPPER: Color("eba67a"),
+	Items.CardMaterial.PAPER: Color("fcfcf7"),
+	Items.CardMaterial.STONE: Color("cfccc4"),
 }
 
 ## The deck card this node shows. Set it, or dir, before adding the node to the tree.
@@ -91,7 +94,7 @@ func _ready() -> void:
 	if stamp != CardSlot.Effect.NONE:
 		tips.append("%s stamp: %s" % [CardSlot.INFO[stamp][0], _stamp_text()])
 	if data.material != Items.CardMaterial.NONE:
-		tips.append("%s: %s" % [Items.MATERIALS[data.material][0], Items.MATERIALS[data.material][1]])
+		tips.append("%s: %s" % [Items.MATERIALS[data.material][0], data.material_text()])
 	tooltip_text = "\n".join(tips)
 
 
@@ -126,7 +129,7 @@ func _make_custom_tooltip(_for_text: String) -> Object:
 		box.add_child(CardSlot.make_tooltip(info[0], info[2], _stamp_text(), "STAMP"))
 	if data.material != Items.CardMaterial.NONE:
 		var info: Array = Items.MATERIALS[data.material]
-		box.add_child(CardSlot.make_tooltip(info[0], info[3], info[1], "MATERIAL"))
+		box.add_child(CardSlot.make_tooltip(info[0], info[3], data.material_text(), "MATERIAL"))
 	return box
 
 
@@ -155,7 +158,7 @@ func _draw() -> void:
 
 
 ## Patterns the face for the card's material, under the arrow: grain for WOOD, a sheen for SHINY,
-## sparkles for GOLD.
+## sparkles for GOLD, rivets and a patina for COPPER, ruled lines for PAPER, speckles and a crack for STONE.
 func _draw_material(zoom: float) -> void:
 	var inner := Rect2(Vector2(6, 6), size - Vector2(12, 12))
 	match data.material:
@@ -187,6 +190,27 @@ func _draw_material(zoom: float) -> void:
 				for i in 8:
 					points.append(c + Vector2.from_angle(i * PI / 4) * (r if i % 2 == 0 else r * 0.3))
 				draw_colored_polygon(points, Color(1, 1, 0.92, 0.9))
+		Items.CardMaterial.COPPER:
+			draw_rect(inner, Color("9a4f22", 0.55), false, 1.5 * zoom)
+			for at: Vector2 in [Vector2(0.16, 0.12), Vector2(0.84, 0.12), Vector2(0.16, 0.88), Vector2(0.84, 0.88)]:
+				draw_circle(at * size, 2.2 * zoom, Color("9a4f22", 0.7))
+			# Verdigris creeping in from a corner.
+			for blot: Array in [[Vector2(0.24, 0.74), 5.0], [Vector2(0.34, 0.8), 3.5], [Vector2(0.2, 0.62), 2.5]]:
+				draw_circle(blot[0] * size, blot[1] * zoom, Color("5fb59a", 0.45))
+		Items.CardMaterial.PAPER:
+			var rule := Color("8fb3e0", 0.6)
+			for i in 6:
+				var y := size.y * (0.18 + 0.13 * i)
+				draw_line(Vector2(inner.position.x, y), Vector2(inner.end.x, y), rule, 1.0 * zoom)
+			var margin := inner.position.x + size.x * 0.12
+			draw_line(Vector2(margin, inner.position.y), Vector2(margin, inner.end.y), Color("e07a7a", 0.6), 1.0 * zoom)
+		Items.CardMaterial.STONE:
+			var fleck := Color("6f6b62", 0.5)
+			for at: Vector2 in [Vector2(0.2, 0.2), Vector2(0.72, 0.16), Vector2(0.84, 0.5), Vector2(0.3, 0.62),
+					Vector2(0.62, 0.78), Vector2(0.16, 0.84), Vector2(0.5, 0.12)]:
+				draw_circle(at * size, 1.6 * zoom, fleck)
+			draw_polyline(PackedVector2Array([Vector2(0.86, 0.3) * size, Vector2(0.74, 0.42) * size,
+					Vector2(0.8, 0.54) * size, Vector2(0.68, 0.68) * size]), Color("5a564e", 0.55), 1.3 * zoom, true)
 
 
 func _stamp_font_size() -> int:
