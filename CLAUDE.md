@@ -47,14 +47,22 @@ pass over).
   cells (`_place_walls`): a run that does neither much (`WALL_MIN_REACH`) is left out, the walls
   together add at most `WALL_DETOUR` of the board's side to the way to the cheese, and a run is cut
   short rather than cut a cell off. Dead ends the walls make off the way to the cheese are
-  **pockets** (`_pockets`): the chest goes in one (a U of wall is laid for it if there's none,
-  `_place_pocket`) and the rest get a crumb, so a dead end always holds a reward. Nothing walks,
+  **pockets** (`_pockets`): the chest goes in a chasm's nook if there is one, else in a pocket (a U
+  of wall is laid for it if there's none, `_place_pocket`), and the rest get a crumb, so a dead end
+  always holds a reward. Nothing walks,
   slides or jumps through a wall, except the mouse during a turn of the SQUEEZE consumable.
-- **Chasms** (`main.gd` `_place_chasms`, `board.chasms`): runs of cells a cell wide that can turn
-  corners, never on the mouse, cheese or a trap and never touching another chasm. Like a gap, nothing
-  can move onto a chasm cell but jumps pass over it, so LEAP crosses one. A chasm that would cut a
-  cell off gets a **bridge** (`bridges`, plain floor) on a straight stretch, or is left out; others
-  get one with `BRIDGE_CHANCE`.
+- **Chasms** (`main.gd` `_place_chasms`, `board.chasms`): laid after the walls and like them, as
+  runs of cells a cell wide (3 up to `CHASM_SPAN` of the board's side) that turn a corner at most
+  once, starting from the board's edge or beside a wall or chasm and stopping where they meet one, so
+  they join the walls into dividers (`_chasm_run`). Never on the mouse, cheese or a trap. Like a gap,
+  nothing can move onto a chasm cell but jumps pass over it, so LEAP crosses one. A chasm that cuts
+  the board in two gets one **bridge** (`bridges`, plain floor) on a straight stretch
+  (`_bridge_spots`), or is left out: the bridge is a **choke point**, the only way over to the cheese
+  or into a **nook** (`_nooks`) that holds the chest or a crumb. Each chasm is the one of
+  `CHASM_TRIES` that scores most, chokes counting `CHASM_CHOKE_SCORE` steps, and the chasms together
+  add at most `CHASM_DETOUR` of the board's side to the way to the cheese on top of the walls. Each
+  chasm gets, with `CHASM_PAD_CHANCE`, a jump pad that throws the mouse across it where that saves
+  at least `CHASM_PAD_SAVING` steps (`_place_chasm_pads`), on top of the round's other pads.
 
 ### Multi-tile denial: threaten several cells, changing each turn
 - **Cats**: each shows the path it will walk this turn; moving onto a cat or its path catches the
@@ -72,7 +80,8 @@ pass over).
 
 ### Movement options: carry the mouse farther
 - **Jump pads** (`pads`, cell -> offset): throw the mouse 2-4 cells the way the pad's arrow points,
-  as a jump (`Board.jump_landing`). Only placed where the whole throw is clear and doesn't land on a trap.
+  as a jump (`Board.jump_landing`). Only placed where the whole throw is clear and doesn't land on a
+  trap. Some are thrown across a chasm as a shortcut (see Chasms).
 - **Mouse holes**, in linked pairs (`holes[0]` with `holes[1]`, ...): pop out of the other one.
   Slides stop on one (and go down it); jumps pass over it.
 - **Conveyor belts**: carry the mouse a cell the belt's way, and on along the belt. Never placed

@@ -36,12 +36,22 @@ const CHEST_MAX_DETOUR := 8
 ## Cells deep a pocket of wall made for the chest is (see _wall_run).
 const POCKET_DEPTH_MIN := 2
 const POCKET_DEPTH_MAX := 3
-## Each chasm is a line of this many cells, a cell wide, turning a corner at each cell with
-## CHASM_TURN_CHANCE. A chasm that could do without a bridge still gets one with BRIDGE_CHANCE.
+## Each chasm is a run of CHASM_MIN cells up to CHASM_SPAN of the board's side, a cell wide. It turns
+## a corner at most once, at each cell with CHASM_TURN_CHANCE.
 const CHASM_MIN := 3
-const CHASM_MAX := 8
+const CHASM_SPAN := 0.7
 const CHASM_TURN_CHANCE := 0.25
-const BRIDGE_CHANCE := 0.35
+## Chasms tried for each one laid (see _place_chasms). The one that does most is kept.
+const CHASM_TRIES := 16
+## The chasms lengthen the way from the mouse to the cheese by at most this share of the board's side,
+## on top of the walls.
+const CHASM_DETOUR := 0.3
+## What a chasm that makes its bridge a choke point is worth, in steps longer on the way to the cheese.
+const CHASM_CHOKE_SCORE := 3.0
+## Chance that a chasm gets a jump pad that throws the mouse across it, if one would save at least
+## CHASM_PAD_SAVING steps.
+const CHASM_PAD_CHANCE := 0.5
+const CHASM_PAD_SAVING := 4
 ## Each conveyor belt is this many cells in a line, all running the same way.
 const BELT_MIN := 2
 const BELT_MAX := 4
@@ -284,15 +294,19 @@ func new_round() -> void:
 	var cheese := _random_cell()
 	while _distance(mouse, cheese) < mini(MIN_CHEESE_DISTANCE, board.grid - 2):
 		cheese = _random_cell()
+	# Last round's mouse cell would hold down any plate laid on it while the layout is checked.
+	board.mouse_cell = mouse
 	var traps := _place_traps(mouse, cheese)
 	var walls := _place_walls(mouse, cheese, traps)
-	# A chest goes in a pocket of wall, once the round has walls. Laid now, so the rest keeps off it.
+	var chasms := _place_chasms(mouse, cheese, traps)
+	# A chest goes behind a bridge or in a pocket of wall, once the round has walls. Laid now, so the
+	# rest keeps off it.
 	var chest := randf() < CHEST_CHANCE
 	if chest and Difficulty.walls(run.round_number) > 0:
 		var pocket := _place_pocket(mouse, cheese, traps)
 		if pocket != NO_CELL:
 			board.chests.append(pocket)
-	_place_chasms(mouse, cheese, traps)
+	_place_chasm_pads(chasms, mouse, cheese)
 	_place_locks(mouse, cheese, traps)
 	_place_hazards(mouse, cheese, traps)
 	_place_floor(mouse, cheese, traps)
@@ -1627,15 +1641,19 @@ func _place_walls(mouse: Vector2i, cheese: Vector2i, traps: Array[Vector2i]) -> 
 	return board.walls
 
 
-## Finds a pocket to hide the chest in (see _pockets), the one farthest off the way to the cheese. The
-## walls laid so far may have made one. If not, tries POCKET_TRIES U-shaped runs of wall (see _wall_run)
-## that keep the way to the cheese within _longest_way, and lays the one that makes the farthest pocket.
-## Returns the pocket's cell, or NO_CELL with nothing laid when no run makes one.
+## Finds a place to hide the chest in: a nook behind a bridge (see _nooks), or a pocket (see _pockets),
+## the one farthest off the way to the cheese. The chasms and walls laid so far may have made one. If
+## not, tries POCKET_TRIES U-shaped runs of wall (see _wall_run) that keep the way to the cheese within
+## _longest_way, and lays the one that makes the farthest pocket. Returns the cell, or NO_CELL with
+## nothing laid when no run makes one.
 func _place_pocket(mouse: Vector2i, cheese: Vector2i, traps: Array[Vector2i]) -> Vector2i:
+	var nooks := _nooks(mouse, cheese)
+	if not nooks.is_empty():
+		return _farthest(nooks)
 	var pockets := _pockets(board.distances_from(mouse), mouse, cheese)
 	if not pockets.is_empty():
 		return _farthest(pockets)
-	var open_cells := board.grid * board.grid - traps.size()
+	var open_cells := board.grid * board.grid - traps.size() - board.chasms.size()
 	var best: Array[Vector3i] = []
 	var best_cell := NO_CELL
 	var best_detour := 0
@@ -1814,67 +1832,210 @@ func _wall_ends() -> Array[Vector2i]:
 	return ends
 
 
-## Lays down Difficulty.chasms() chasms (see _chasm_run), off the mouse, the cheese and the traps. A
-## chasm that would cut any cell off from the mouse gets a bridge across a straight stretch of it, if
-## one is enough, and is left out otherwise. Any other chasm gets a bridge with BRIDGE_CHANCE.
-func _place_chasms(mouse: Vector2i, cheese: Vector2i, traps: Array[Vector2i]) -> void:
-	var open_cells := board.grid * board.grid - traps.size()
-	var count := 0
-	for attempt in 200:
-		if count == Difficulty.chasms(run.round_number):
-			break
-		var cells := _chasm_run(mouse, cheese, traps)
-		if cells.is_empty():
-			continue
-		# A bridge goes where the chasm runs straight, so it has floor at both ends.
-		var spans: Array[Vector2i] = []
-		for i in range(1, cells.size() - 1):
-			if cells[i] - cells[i - 1] == cells[i + 1] - cells[i]:
-				spans.append(cells[i])
-		spans.shuffle()
-		var tries: Array[Vector2i] = spans.duplicate()
-		if spans.is_empty() or randf() >= BRIDGE_CHANCE:
-			tries.push_front(NO_CELL)
-		for bridge in tries:
-			var added := cells.filter(func(cell: Vector2i) -> bool: return cell != bridge)
-			board.chasms.append_array(added)
-			if board.distances_from(mouse).size() == open_cells - board.chasms.size():
-				if bridge != NO_CELL:
-					board.bridges.append(bridge)
-				count += 1
-				break
-			for cell: Vector2i in added:
+## Lays down Difficulty.chasms() chasms (see _chasm_run), each the one of CHASM_TRIES that does most,
+## like the walls (see _place_walls). A chasm that cuts part of the board off from the mouse gets a
+## bridge across a straight stretch of it (see _bridge_spots), which makes the bridge a choke point:
+## the only way over to the cheese, or into a nook that gets the chest or a crumb (see _nooks). That's
+## worth CHASM_CHOKE_SCORE, and the bridge kept is the one that most lengthens the way to the cheese. A
+## chasm one bridge can't join back up is left out. Any other chasm is only laid if it lengthens the way
+## to the cheese, or to WALL_MIN_REACH of the cells, like a wall. All together the chasms lengthen the
+## way to the cheese by at most CHASM_DETOUR of the board's side on top of the walls (_longest_way).
+## Returns the chasms laid, each as its cells, bridge and all.
+func _place_chasms(mouse: Vector2i, cheese: Vector2i, traps: Array[Vector2i]) -> Array[Array]:
+	var chasms: Array[Array] = []
+	var count := Difficulty.chasms(run.round_number)
+	if count == 0:
+		return chasms
+	_longest_way = maxi(_longest_way, board.distances_from(mouse)[cheese] + ceili(board.grid * CHASM_DETOUR))
+	for i in count:
+		var open_cells := board.grid * board.grid - traps.size() - board.chasms.size()
+		var before := board.distances_from(mouse)
+		var best: Array[Vector2i] = []
+		var best_bridge := NO_CELL
+		var best_score := 0.0
+		for attempt in CHASM_TRIES:
+			var cells := _chasm_run(mouse, cheese, traps)
+			if cells.is_empty():
+				continue
+			board.chasms.append_array(cells)
+			var left := open_cells - cells.size()
+			var choke := board.distances_from(mouse).size() != left
+			var bridges: Array[Vector2i] = [NO_CELL]
+			if choke:
+				bridges = _bridge_spots(cells)
+				left += 1
+			for bridge in bridges:
+				board.chasms.erase(bridge)
+				var after := board.distances_from(mouse)
+				if choke:
+					board.chasms.append(bridge)
+				if after.size() != left or after[cheese] > _longest_way:
+					continue
+				var longer := 0
+				for cell in after:
+					if after[cell] > before[cell]:
+						longer += 1
+				var gain: int = after[cheese] - before[cheese]
+				if not choke and gain == 0 and longer < open_cells * WALL_MIN_REACH:
+					continue
+				var score := gain + longer / float(open_cells) + (CHASM_CHOKE_SCORE if choke else 0.0)
+				if score > best_score:
+					best = cells
+					best_bridge = bridge
+					best_score = score
+			for cell in cells:
 				board.chasms.erase(cell)
+		if best.is_empty():
+			continue
+		for cell in best:
+			if cell != best_bridge:
+				board.chasms.append(cell)
+		if best_bridge != NO_CELL:
+			board.bridges.append(best_bridge)
+		chasms.append(best)
+	return chasms
 
 
-## A random chasm: a walk of CHASM_MIN to CHASM_MAX cells from a random one, sometimes turning a
-## corner, that stops short of the board's edge, the mouse, the cheese, a trap, the chest or another
-## chasm. It
-## stays a cell wide: no cell in it touches another chasm cell (even one of its own) but the ones
-## before and after it. Empty if that leaves it shorter than CHASM_MIN.
+## The cells of a chasm a bridge can go on: where it runs straight, with floor and no wall on both
+## sides across it.
+func _bridge_spots(cells: Array[Vector2i]) -> Array[Vector2i]:
+	var spots: Array[Vector2i] = []
+	for i in range(1, cells.size() - 1):
+		var along := cells[i] - cells[i - 1]
+		if cells[i + 1] - cells[i] != along:
+			continue
+		var across := Vector2i(along.y, along.x)
+		if [cells[i] + across, cells[i] - across].all(func(side: Vector2i) -> bool:
+				return board._in_bounds(side) and not board.is_blocked(side) and not board.has_wall(cells[i], side)):
+			spots.append(cells[i])
+	return spots
+
+
+## A random chasm: a walk of CHASM_MIN cells up to CHASM_SPAN of the board's side, a cell wide, that
+## turns a corner at most once. Like a run of wall (see _wall_run) it starts on the board's edge heading
+## in, beside a wall or a chasm heading away from it, or anywhere inside, and stops on reaching the
+## edge, a wall or another chasm (even diagonally), so chasms join up with the walls and each other into
+## dividers. It stops short of the mouse, the cheese, a trap and a bridge. Empty if that leaves it
+## shorter than CHASM_MIN.
 func _chasm_run(mouse: Vector2i, cheese: Vector2i, traps: Array[Vector2i]) -> Array[Vector2i]:
 	var cells: Array[Vector2i] = []
+	var size := board.grid
 	var cell := _random_cell()
-	var dir: Card.Dir = Card.Dir.values().pick_random()
-	for i in randi_range(CHASM_MIN, CHASM_MAX):
+	var offset: Vector2i = Card.OFFSETS.values().pick_random()
+	var starts := _chasm_starts()
+	var start := randf()
+	if start < 0.5:
+		# On the edge the run heads away from.
+		if offset.x != 0:
+			cell.x = 0 if offset.x > 0 else size - 1
+		else:
+			cell.y = 0 if offset.y > 0 else size - 1
+	elif start < 0.75 and not starts.is_empty():
+		var from: Array = starts.pick_random()
+		cell = from[0]
+		offset = from[1]
+	# Which way the corner turns: a quarter turn one way or the other.
+	var turn: int = [1, -1].pick_random()
+	var turned := false
+	for i in randi_range(CHASM_MIN, maxi(roundi(size * CHASM_SPAN), CHASM_MIN)):
 		if i > 0:
-			if randf() < CHASM_TURN_CHANCE:
-				var offset: Vector2i = Card.OFFSETS[dir]
-				dir = Card.OFFSETS.find_key(Vector2i(offset.y, offset.x) * [1, -1].pick_random()) as Card.Dir
-			cell += Card.OFFSETS[dir]
-		if not board._in_bounds(cell) or cell == mouse or cell == cheese or cell in traps or cell in board.chests:
-			break
-		var touches := false
-		for offset: Vector2i in Card.OFFSETS.values():
-			var next := cell + offset
-			if next in board.chasms or next in board.bridges or next in cells and next != cells[-1]:
-				touches = true
-		if touches or cell in board.chasms or cell in board.bridges:
+			if not turned and randf() < CHASM_TURN_CHANCE:
+				offset = Vector2i(-offset.y, offset.x) * turn
+				turned = true
+			if board.has_wall(cell, cell + offset):
+				break
+			cell += offset
+		if not board._in_bounds(cell) or cell == mouse or cell == cheese or cell in traps or board.is_blocked(cell) \
+				or cell in board.bridges:
 			break
 		cells.append(cell)
+		var on_edge := cell.x == 0 or cell.y == 0 or cell.x == size - 1 or cell.y == size - 1
+		if i > 0 and (on_edge or _touches_chasm(cell, cells)):
+			break
 	if cells.size() < CHASM_MIN:
 		cells.clear()
 	return cells
+
+
+## Where a chasm can start beside a wall or a chasm: [cell, offset] pairs, the offset heading straight
+## away from it.
+func _chasm_starts() -> Array:
+	var starts := []
+	for edge: Vector3i in board.walls:
+		var sides := _edge_cells(edge)
+		starts.append([sides[0], sides[0] - sides[1]])
+		starts.append([sides[1], sides[1] - sides[0]])
+	for chasm in board.chasms:
+		for offset: Vector2i in Card.OFFSETS.values():
+			starts.append([chasm + offset, offset])
+	return starts
+
+
+## True when a chasm or a bridge that isn't one of the run's cells is next to the cell, even diagonally.
+func _touches_chasm(cell: Vector2i, run_cells: Array[Vector2i]) -> bool:
+	for x in range(-1, 2):
+		for y in range(-1, 2):
+			var next := cell + Vector2i(x, y)
+			if next not in run_cells and (next in board.chasms or next in board.bridges):
+				return true
+	return false
+
+
+## Nooks: the parts of the board, but the cheese's, that a bridge is the only way into from the mouse.
+## Maps the cell in each farthest from the mouse and off the floor tiles, if it's at least
+## CHEST_MIN_DISTANCE from the mouse, to its steps from the mouse.
+func _nooks(mouse: Vector2i, cheese: Vector2i) -> Dictionary[Vector2i, int]:
+	var from_mouse := board.distances_from(mouse)
+	var spacing := mini(CHEST_MIN_DISTANCE, board.grid - 2)
+	var nooks: Dictionary[Vector2i, int] = {}
+	for bridge in board.bridges:
+		board.chasms.append(bridge)
+		var shut := board.distances_from(mouse)
+		board.chasms.erase(bridge)
+		if not shut.has(cheese):
+			continue
+		var far := NO_CELL
+		for cell in from_mouse:
+			if not shut.has(cell) and cell != cheese and not board.has_tile(cell) \
+					and (far == NO_CELL or from_mouse[cell] > from_mouse[far]):
+				far = cell
+		if far != NO_CELL and _distance(far, mouse) >= spacing:
+			nooks[far] = from_mouse[far]
+	return nooks
+
+
+## Gives each chasm, with CHASM_PAD_CHANCE, a jump pad beside it that throws the mouse across: of the
+## ones that would, the one that saves the most steps on the way from the mouse to where it lands, if
+## that's at least CHASM_PAD_SAVING. The pad and its landing are off the cheese, the traps, the floor
+## tiles and the items.
+func _place_chasm_pads(chasms: Array[Array], mouse: Vector2i, cheese: Vector2i) -> void:
+	for cells in chasms:
+		if randf() >= CHASM_PAD_CHANCE:
+			continue
+		var from_mouse := board.distances_from(mouse)
+		var best_pad := NO_CELL
+		var best_offset := Vector2i.ZERO
+		var best_saving := CHASM_PAD_SAVING - 1
+		for cell: Vector2i in cells:
+			if cell not in board.chasms:
+				continue
+			for offset: Vector2i in Card.OFFSETS.values():
+				var pad := cell - offset
+				if not from_mouse.has(pad) or pad == mouse or pad == cheese or board.has_tile(pad) \
+						or board.has_item(pad):
+					continue
+				for reach in range(PAD_MIN, PAD_MAX + 1):
+					var landing := pad + offset * reach
+					if board.jump_landing(pad, offset * reach) != landing or not from_mouse.has(landing) \
+							or landing == cheese or board.has_tile(landing) or board.has_item(landing):
+						continue
+					var saving: int = from_mouse[landing] - from_mouse[pad] - 1
+					if saving > best_saving:
+						best_pad = pad
+						best_offset = offset * reach
+						best_saving = saving
+		if best_pad != NO_CELL:
+			board.pads[best_pad] = best_offset
 
 
 ## Lays down the round's locked doors, each with a key, and its switches: a gate, the pressure plate
@@ -2059,8 +2220,10 @@ func _place_floor(mouse: Vector2i, cheese: Vector2i, traps: Array[Vector2i]) -> 
 	var free := func(cell: Vector2i) -> bool:
 		return bounds.has_point(cell) and cell != mouse and cell != cheese and cell not in traps \
 			and not board.has_tile(cell) and not board.has_item(cell) and cell not in _crate_lanes
+	# On top of any thrown across a chasm (see _place_chasm_pads).
+	var pad_count := board.pads.size() + Difficulty.pads(number)
 	for attempt in 500:
-		if board.pads.size() == Difficulty.pads(number):
+		if board.pads.size() == pad_count:
 			break
 		var cell := _random_cell()
 		var offset: Vector2i = Card.OFFSETS[Card.Dir.values().pick_random()] * randi_range(PAD_MIN, PAD_MAX)
@@ -2119,13 +2282,14 @@ func _place_floor(mouse: Vector2i, cheese: Vector2i, traps: Array[Vector2i]) -> 
 
 
 ## Picks crumb cells off the mouse, the cheese, the traps, the floor tiles (see _place_floor), the
-## keys, plates, crates, chests and crate lanes (see _place_locks) and each other. Pockets the walls
-## made (see _pockets) get theirs first, so a dead end always has something in it.
+## keys, plates, crates, chests and crate lanes (see _place_locks) and each other. Nooks behind a bridge
+## (see _nooks) and pockets the walls made (see _pockets) get theirs first, so a dead end always has
+## something in it.
 func _place_crumbs(mouse: Vector2i, cheese: Vector2i, traps: Array[Vector2i]) -> Array[Vector2i]:
 	var crumbs: Array[Vector2i] = []
-	for cell in _pockets(board.distances_from(mouse), mouse, cheese):
-		if crumbs.size() < CRUMB_COUNT and not board.has_tile(cell) and not board.has_item(cell) \
-				and cell not in _crate_lanes:
+	for cell in _nooks(mouse, cheese).keys() + _pockets(board.distances_from(mouse), mouse, cheese).keys():
+		if crumbs.size() < CRUMB_COUNT and cell not in crumbs and not board.has_tile(cell) \
+				and not board.has_item(cell) and cell not in _crate_lanes:
 			crumbs.append(cell)
 	for attempt in 1000:
 		if crumbs.size() == CRUMB_COUNT:
