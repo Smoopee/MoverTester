@@ -11,8 +11,9 @@ enum Trinket {
 	# Score trinkets (see Score).
 	BUTTER_PAT, RIDE_TICKET,
 }
-## What a card is made of. It pays out each time the card plays, whatever the slot does.
-enum CardMaterial { NONE, WOOD, SHINY, GOLD }
+## What a card is made of. It pays out each time the card plays, whatever the slot does, except STONE,
+## which pays when the card stays in the hand.
+enum CardMaterial { NONE, WOOD, SHINY, GOLD, COPPER, PAPER, STONE }
 enum Consumable { FRESH_BREEZE, CALM, NEW_PAWS, CHEESE_BAIT, SQUEEZE }
 enum Skill {
 	WARP, EFFICIENT, THICK_FUR,
@@ -61,12 +62,13 @@ const SKILL_SLOTS := 4
 ## effects would just make it another direction card. Some are stamps only (CardSlot.STAMP_ONLY).
 const STAMPS: Array[CardSlot.Effect] = [
 	CardSlot.Effect.DOUBLE, CardSlot.Effect.LEAP, CardSlot.Effect.SLIDE, CardSlot.Effect.STRIDE,
-	CardSlot.Effect.SWIVEL, CardSlot.Effect.STEADY, CardSlot.Effect.RECYCLE,
+	CardSlot.Effect.SWIVEL, CardSlot.Effect.STEADY, CardSlot.Effect.TUNNEL, CardSlot.Effect.SCURRY,
 ]
 const STAMP_PRICE := 6
 ## Stamps that cost something other than STAMP_PRICE.
 const STAMP_PRICES := {
 	CardSlot.Effect.SWIVEL: 9,
+	CardSlot.Effect.TUNNEL: 8,
 }
 ## Crumbs a GOLD card pays each time it plays.
 const GOLD_CRUMBS := 1
@@ -77,6 +79,14 @@ const MATERIALS := {
 	CardMaterial.SHINY: ["SHINY", "Score: +%d mult for the turn each time the card plays." % Score.SHINY_MULT, 6,
 		Color("9fd8ff")],
 	CardMaterial.GOLD: ["GOLD", "+%d crumb each time the card plays." % GOLD_CRUMBS, 8, Color("f5c542")],
+	CardMaterial.COPPER: ["COPPER",
+		# Two formats: one with an array isn't a constant expression.
+		("Score: +%d point the first time the card plays, " % Score.COPPER_POINTS)
+			+ ("and %d more each time after, for the rest of the run." % Score.COPPER_GROWTH), 6, Color("e0844f")],
+	CardMaterial.PAPER: ["PAPER", "Score: +%d point for each cell the card moves the mouse." % Score.PAPER_POINTS,
+		4, Color("c9d6e8")],
+	CardMaterial.STONE: ["STONE", "Score: +%d mult when you Lock In with the card still in your hand." \
+		% Score.STONE_MULT, 6, Color("a8a49a")],
 }
 ## Consumables the player can hold at once.
 const POUCH_SIZE := 3

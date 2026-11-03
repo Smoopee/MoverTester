@@ -9,8 +9,8 @@ enum Kind { TRINKET, SKILL, CONSUMABLE, STAMP, MATERIAL }
 
 const OFFERS_PER_ROW := 2
 const OFFER_SIZE := Vector2(170, 112)
-## The sections (trinkets, skills, consumables, stamps, materials) are laid out in a grid this many wide.
-const SECTION_COLUMNS := 3
+## The sections (trinkets, skills, consumables, card upgrades) are laid out in a grid this many wide.
+const SECTION_COLUMNS := 2
 const PICKER_COLUMNS := 6
 const ICON_SIZE := 22
 ## Height of a Buy button on a touchscreen, sized for a finger.
@@ -108,8 +108,8 @@ func _ready() -> void:
 	_add_section(Kind.TRINKET, "Trinkets", "")
 	_add_section(Kind.SKILL, "Skills", "")
 	_add_section(Kind.CONSUMABLE, "Consumables", "")
-	_add_section(Kind.STAMP, "Card stamps", "Changes how one card moves, for good.")
-	_add_section(Kind.MATERIAL, "Card materials", "Changes what one card pays when it plays.")
+	# Stamps and materials share this row (_row_of).
+	_add_section(Kind.STAMP, "Card upgrades", "A stamp changes how one card moves; a material, what it pays.")
 
 	_picker.add_theme_constant_override("separation", 12)
 	_picker_title.add_theme_font_size_override("font_size", 18)
@@ -142,15 +142,14 @@ func open(run: Run, free_trinket := false) -> void:
 	_free_trinket = free_trinket
 	_rerolls = 0
 	_trinket_hint.text = "Boss reward: take one for free." if free_trinket else "Yours for the rest of the run."
-	_fill_row(Kind.TRINKET, _unowned(Kind.TRINKET), _row_size(Kind.TRINKET))
-	_fill_row(Kind.SKILL, _unowned(Kind.SKILL))
+	_fill_row(Kind.TRINKET, _picks(Kind.TRINKET, _unowned(Kind.TRINKET)), _row_size(Kind.TRINKET))
+	_fill_row(Kind.SKILL, _picks(Kind.SKILL, _unowned(Kind.SKILL)))
 	var boss_next := Boss.is_boss_round(run.round_number + 1)
 	_boss_label.visible = boss_next
 	_boss_label.text = "Next round is a boss. %s" % Boss.describe(run.next_boss)
 	_next_button.text = "Boss Round" if boss_next else "Next Round"
-	_fill_row(Kind.CONSUMABLE, Items.Consumable.values())
-	_fill_row(Kind.STAMP, Items.STAMPS.duplicate())
-	_fill_row(Kind.MATERIAL, Items.MATERIALS.keys())
+	_fill_row(Kind.CONSUMABLE, _picks(Kind.CONSUMABLE, Items.Consumable.values()))
+	_fill_row(Kind.STAMP, _picks(Kind.STAMP, Items.STAMPS) + _picks(Kind.MATERIAL, Items.MATERIALS.keys()))
 	close_picker()
 	BugReport.note("Shop opened with %d crumbs" % run.crumbs)
 	show()
@@ -196,24 +195,24 @@ func _add_section(kind: Kind, title: String, hint: String) -> void:
 	_sections.add_child(section)
 
 
-## Puts up to count random picks from pool up for sale in the kind's row, in place of what was there.
-## Picks from avoid come last, so a reroll shows new things while there are any.
-func _fill_row(kind: Kind, pool: Array, count := OFFERS_PER_ROW, avoid: Array = []) -> void:
-	var row: HBoxContainer = _rows[kind]
+## Puts up to count random picks from pool (see _picks) up for sale in the row, in place of what was
+## there. Picks from avoid come last, so a reroll shows new things while there are any.
+func _fill_row(row_kind: Kind, pool: Array, count := OFFERS_PER_ROW, avoid: Array = []) -> void:
+	var row: HBoxContainer = _rows[row_kind]
 	for child in row.get_children():
 		row.remove_child(child)
 		child.queue_free()
-	_offers.assign(_offers.filter(func(o: Offer) -> bool: return o.kind != kind))
-	var fresh := pool.filter(func(id: int) -> bool: return id not in avoid)
-	var seen := pool.filter(func(id: int) -> bool: return id in avoid)
+	_offers.assign(_offers.filter(func(o: Offer) -> bool: return _row_of(o.kind) != row_kind))
+	var fresh := pool.filter(func(pick: Vector2i) -> bool: return pick not in avoid)
+	var seen := pool.filter(func(pick: Vector2i) -> bool: return pick in avoid)
 	fresh.shuffle()
 	seen.shuffle()
 	pool = fresh + seen
-	for id: int in pool.slice(0, count):
+	for pick: Vector2i in pool.slice(0, count):
 		var offer := Offer.new()
-		offer.kind = kind
-		offer.id = id
-		offer.price = 0 if kind == Kind.TRINKET and _free_trinket else _info(offer)[2]
+		offer.kind = pick.x as Kind
+		offer.id = pick.y
+		offer.price = 0 if offer.kind == Kind.TRINKET and _free_trinket else _info(offer)[2]
 		_offers.append(offer)
 		row.add_child(_make_tile(offer))
 	if pool.is_empty():
@@ -221,6 +220,16 @@ func _fill_row(kind: Kind, pool: Array, count := OFFERS_PER_ROW, avoid: Array = 
 		none.text = "Sold out."
 		none.modulate = Color(1, 1, 1, 0.6)
 		row.add_child(none)
+
+
+## The ids of one kind as picks for _fill_row: Vector2i(kind, id), so a row can mix kinds.
+static func _picks(kind: Kind, ids: Array) -> Array:
+	return ids.map(func(id: int) -> Vector2i: return Vector2i(kind, id))
+
+
+## The kind whose row shows offers of this kind: materials go in the stamps' row.
+static func _row_of(kind: Kind) -> Kind:
+	return Kind.STAMP if kind == Kind.MATERIAL else kind
 
 
 ## The trinkets or skills the run doesn't have yet.
@@ -279,8 +288,8 @@ func _reroll(kind: Kind) -> void:
 	_run.crumbs -= price
 	_rerolls += 1
 	var shown: Array = _offers.filter(func(o: Offer) -> bool: return o.kind == kind) \
-			.map(func(o: Offer) -> int: return o.id)
-	_fill_row(kind, _unowned(kind), _row_size(kind), shown)
+			.map(func(o: Offer) -> Vector2i: return Vector2i(o.kind, o.id))
+	_fill_row(kind, _picks(kind, _unowned(kind)), _row_size(kind), shown)
 	BugReport.note("Rerolled the %s for %d (%d crumbs left)" % ["trinkets" if kind == Kind.TRINKET else "skills",
 			price, _run.crumbs])
 	refresh()

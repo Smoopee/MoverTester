@@ -170,6 +170,8 @@ var round_score := 0
 var score_target := 0
 var turn_points := 0
 var turn_mult := 1
+## Cells the card playing now has moved the mouse, for a PAPER card. _play_cards zeroes it for each card.
+var card_cells := 0
 ## What the last turn added to the score, for the HUD.
 var last_turn_score := ""
 ## Points made this frame, by the cell that made them, waiting to pop up together (_pop_points).
@@ -438,6 +440,7 @@ func lock_in() -> void:
 	var order := _play_order()
 	var reached := await _play_cards(order)
 	_score_cards(order.slice(0, reached))
+	_pay_stones()
 	# Set when the mouse reaches the cheese or is caught in a trap.
 	var ended := _round_over()
 	# Glue holds the mouse: the cards left don't move it.
@@ -512,6 +515,8 @@ func _play_cards(order: Array[CardSlot], preview := false) -> int:
 	last_dir = -1
 	board.stuck = false
 	var ended := false
+	# Until a card plays, for SCURRY.
+	var first := true
 	var i := 0
 	while i < order.size() and not ended and not board.stuck:
 		var slot := order[i]
@@ -527,6 +532,7 @@ func _play_cards(order: Array[CardSlot], preview := false) -> int:
 			break
 		i += 1
 		card.modulate = PLAYING
+		card_cells = 0
 		if diagonal:
 			var partner := partner_slot.get_card()
 			i += 1
@@ -543,7 +549,7 @@ func _play_cards(order: Array[CardSlot], preview := false) -> int:
 			if not preview:
 				_play_material(partner)
 		else:
-			ended = await _play(slot, card)
+			ended = await _play(slot, card, first)
 			# Facing is the last direction moved, which differs from the card for WILD, GAMBLE, etc.
 			BugReport.note("  Slot %d %s%s -> mouse %s" % [slot.number,
 				" ".join(PackedStringArray([CardSlot.INFO[slot.effect][0], card.data.label()])).strip_edges(),
@@ -555,6 +561,7 @@ func _play_cards(order: Array[CardSlot], preview := false) -> int:
 			ended = false
 		if card.modulate == PLAYING:
 			card.modulate = PLAYED
+		first = false
 	return i
 
 
@@ -729,6 +736,8 @@ func _short_of_boss_target() -> bool:
 ## took, plus what the BUTTER PAT, RIDE TICKET and HARD HEAD add. Only the real board is connected, so the
 ## preview scores nothing.
 func _on_mouse_moved(motion: Board.Motion, cells: int) -> void:
+	if motion in [Board.Motion.STEP, Board.Motion.JUMP, Board.Motion.SLIDE]:
+		card_cells += cells
 	match motion:
 		Board.Motion.STEP, Board.Motion.JUMP:
 			_add_points(cells * Score.CELL_POINTS, board.mouse_cell)
@@ -748,12 +757,19 @@ func _on_mouse_moved(motion: Board.Motion, cells: int) -> void:
 	_refresh_hud()
 
 
-## Pays out a card's material as it plays, where the mouse is: WOOD points, SHINY mult, GOLD crumbs.
-## The preview's cards pay nothing.
+## Pays out a card's material as it plays, where the mouse is: WOOD and COPPER points, PAPER points
+## for the cells it moved (card_cells), SHINY mult, GOLD crumbs. The preview's cards pay nothing.
 func _play_material(card: Card) -> void:
 	match card.data.material:
 		Items.CardMaterial.WOOD:
 			_add_points(Score.WOOD_POINTS, board.mouse_cell)
+		Items.CardMaterial.COPPER:
+			_add_points(card.data.copper_points(), board.mouse_cell)
+			card.data.copper_plays += 1
+		Items.CardMaterial.PAPER:
+			if card_cells == 0:
+				return
+			_add_points(card_cells * Score.PAPER_POINTS, board.mouse_cell)
 		Items.CardMaterial.SHINY:
 			turn_mult += Score.SHINY_MULT
 			_pop_mult("+%d mult" % Score.SHINY_MULT)
@@ -766,6 +782,18 @@ func _play_material(card: Card) -> void:
 		_:
 			return
 	BugReport.note("  %s card paid out" % Items.MATERIALS[card.data.material][0])
+	_refresh_hud()
+
+
+## Adds Score.STONE_MULT for each STONE card left in the hand at Lock In.
+func _pay_stones() -> void:
+	var stones := _hand_cards().filter(
+		func(card: Card) -> bool: return card.data.material == Items.CardMaterial.STONE).size()
+	if stones == 0:
+		return
+	turn_mult += stones * Score.STONE_MULT
+	_pop_mult("+%d mult" % (stones * Score.STONE_MULT))
+	BugReport.note("  %d STONE card%s in hand paid out" % [stones, "" if stones == 1 else "s"])
 	_refresh_hud()
 
 
@@ -865,20 +893,27 @@ func _survive_trap() -> bool:
 
 ## Moves the mouse for one card: its slot's effect plays first, then the card's stamp. When both
 ## move the mouse (a BURN slot and a SLIDE stamp), it makes both moves, in that order. When neither
-## does, it steps once. STRIDE steps as many cells as the card is set to. Returns true if the round
-## is over.
-func _play(slot: CardSlot, card: Card) -> bool:
+## does, it steps once. STRIDE steps as many cells as the card is set to, and SCURRY steps twice when
+## the card is the first of the turn to play (first). Returns true if the round is over.
+func _play(slot: CardSlot, card: Card, first: bool) -> bool:
 	var dir := _play_dir(slot, card)
 	var moved := false
 	for effect: CardSlot.Effect in [_slot_effect(slot, card), card.stamp]:
 		match effect:
 			CardSlot.Effect.DOUBLE, CardSlot.Effect.GAMBLE, CardSlot.Effect.BURN, CardSlot.Effect.LEAP, \
-					CardSlot.Effect.SLIDE, CardSlot.Effect.WRAP:
+					CardSlot.Effect.SLIDE, CardSlot.Effect.WRAP, CardSlot.Effect.TUNNEL:
 				moved = true
 				if await _move(effect, dir):
 					return true
 				if board.stuck:
 					return false
+			CardSlot.Effect.SCURRY:
+				if first:
+					moved = true
+					if await _steps(dir, 2):
+						return true
+					if board.stuck:
+						return false
 			CardSlot.Effect.STRIDE:
 				moved = true
 				if await _steps(dir, card.data.stride):
@@ -913,9 +948,9 @@ func _move(effect: CardSlot.Effect, dir: Card.Dir) -> bool:
 			return await _steps(dir, 2)
 		CardSlot.Effect.GAMBLE, CardSlot.Effect.BURN:
 			return await _steps(dir, 3)
-		CardSlot.Effect.LEAP:
+		CardSlot.Effect.LEAP, CardSlot.Effect.TUNNEL:
 			last_dir = dir
-			return await board.jump(Card.OFFSETS[dir] * 2, dir)
+			return await board.jump(Card.OFFSETS[dir] * 2, dir, effect == CardSlot.Effect.TUNNEL)
 		CardSlot.Effect.SLIDE:
 			last_dir = dir
 			return await board.slide(dir)

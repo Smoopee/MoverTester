@@ -283,6 +283,22 @@ func _draw_material(material_id: int, dark: Color) -> void:
 			for i in 8:
 				sparkle.append(Vector2.from_angle(i * PI / 4) * (5.5 if i % 2 == 0 else 1.6))
 			_polygon(sparkle, Color(1, 1, 0.92))
+		Items.CardMaterial.COPPER:
+			# Rivets in the corners, and a patch of verdigris.
+			for at: Vector2 in [Vector2(-4.5, -7.5), Vector2(4.5, -7.5), Vector2(-4.5, 7.5), Vector2(4.5, 7.5)]:
+				_circle(at, 1.1, dark)
+			_circle(Vector2(-2, 3), 3, Color("5fb59a"))
+			_circle(Vector2(1.5, 5), 2, Color("5fb59a"))
+		Items.CardMaterial.PAPER:
+			# Ruled lines and a margin.
+			for y: float in [-6.0, -2.5, 1.0, 4.5, 8.0]:
+				_line([Vector2(-6, y), Vector2(6, y)], 0.9, Color("5f87c0"))
+			_line([Vector2(-3.5, -10), Vector2(-3.5, 10)], 0.9, Color("d05a5a"))
+		Items.CardMaterial.STONE:
+			# Flecks and a crack.
+			for at: Vector2 in [Vector2(-4, -6), Vector2(3.5, -7), Vector2(-3, 4), Vector2(4, 7), Vector2(-1, -1)]:
+				_circle(at, 1, dark)
+			_line([Vector2(5, -4), Vector2(2, -1), Vector2(3.5, 2), Vector2(0.5, 6)], 1.1, dark)
 
 
 ## Points along a circle from angle `from` to angle `to`.

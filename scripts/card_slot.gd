@@ -9,7 +9,7 @@ enum Effect {
 	# Change the direction.
 	REVERSED, ROTATE_CW, ROTATE_CCW, MIRROR, WILD, GAMBLE, SWIVEL,
 	# Change the distance.
-	DOUBLE, LEAP, SLIDE, WRAP, DIAGONAL, STRIDE,
+	DOUBLE, LEAP, SLIDE, WRAP, DIAGONAL, STRIDE, TUNNEL, SCURRY,
 	# Change when or whether it plays.
 	ECHO, LAST, BLOCKED, SNIFF, STEADY,
 	# Change the deck.
@@ -23,9 +23,9 @@ const DECK_COLOR := Color("7ed68a")
 const BLOCKED_COLOR := Color("e06060")
 ## Most cells a STRIDE stamp can be set to move (CardData.stride).
 const MAX_STRIDE := 4
-## Effects only stamps have, which slots never roll. Each needs the card it's on: STRIDE and SWIVEL
-## are set on the card and STEADY ignores the slot.
-const STAMP_ONLY: Array[Effect] = [Effect.STRIDE, Effect.SWIVEL, Effect.STEADY]
+## Effects only stamps have, which slots never roll. Most need the card they're on: STRIDE and SWIVEL
+## are set on the card and STEADY ignores the slot. TUNNEL and SCURRY are rare tricks a card is bought for.
+const STAMP_ONLY: Array[Effect] = [Effect.STRIDE, Effect.SWIVEL, Effect.STEADY, Effect.TUNNEL, Effect.SCURRY]
 ## Name, description and color of each effect.
 const INFO := {
 	Effect.NONE: ["", "", Color(1, 1, 1, 0.35)],
@@ -44,6 +44,8 @@ const INFO := {
 	Effect.DIAGONAL: ["DIAGONAL", "Joins with the next card into one diagonal hop.", DISTANCE_COLOR],
 	Effect.STRIDE: ["STRIDE", "Moves 1 to %d cells, as many as you pick. Click the stamp on the card to change it." %
 		MAX_STRIDE, DISTANCE_COLOR],
+	Effect.TUNNEL: ["TUNNEL", "Jumps 2 cells, digging under any wall, locked door or gate in the way.", DISTANCE_COLOR],
+	Effect.SCURRY: ["SCURRY", "Moves twice when it's the first card to play this turn.", DISTANCE_COLOR],
 	Effect.ECHO: ["ECHO", "Repeats the previous move, then plays this card.", ORDER_COLOR],
 	Effect.LAST: ["LAST", "Plays after all the other slots.", ORDER_COLOR],
 	Effect.BLOCKED: ["BLOCKED", "No card can go here this turn.", BLOCKED_COLOR],

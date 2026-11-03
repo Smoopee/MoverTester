@@ -32,6 +32,14 @@ const DAREDEVIL_TIMES := 2
 ## Card materials (Items.CardMaterial): points a WOOD card and mult a SHINY card add each time it plays.
 const WOOD_POINTS := 2
 const SHINY_MULT := 2
+## A COPPER card's first play adds COPPER_POINTS points, and each play after adds COPPER_GROWTH more
+## than the last, for the rest of the run.
+const COPPER_POINTS := 1
+const COPPER_GROWTH := 1
+## Points a PAPER card adds for each cell it moved the mouse.
+const PAPER_POINTS := 1
+## Mult a STONE card adds when it's still in the hand at Lock In.
+const STONE_MULT := 3
 const COLOR := Color("8fd3ff")
 
 

@@ -698,11 +698,11 @@ func slide(dir: Card.Dir) -> bool:
 
 
 ## Hops the mouse by offset, passing over the cells in between. Lands as far as the edge and the walls
-## allow (see jump_landing).
-func jump(offset: Vector2i, dir: Card.Dir) -> bool:
+## allow (see jump_landing), or, with through_walls (TUNNEL), the edge alone.
+func jump(offset: Vector2i, dir: Card.Dir, through_walls := false) -> bool:
 	facing = dir
 	var start := mouse_cell
-	mouse_cell = jump_landing(mouse_cell, offset)
+	mouse_cell = jump_landing(mouse_cell, offset, through_walls)
 	return await _finish(_hop_tween(), start, [], Motion.JUMP)
 
 
@@ -717,8 +717,10 @@ func _hop_tween() -> Tween:
 ## Where a jump by offset from a cell lands. A straight jump stops at the first wall, locked door or
 ## closed gate, and short of a gap, a chasm or a crate it would land on, though it can pass over them. A diagonal
 ## one (a cell each way) gets around the corner if either way around it is clear of walls, and
-## otherwise goes as far as it can along one axis.
-func jump_landing(from: Vector2i, offset: Vector2i) -> Vector2i:
+## otherwise goes as far as it can along one axis. With through_walls, walls, doors and gates don't
+## stop it, as while squeezing.
+func jump_landing(from: Vector2i, offset: Vector2i, through_walls := false) -> Vector2i:
+	var through := squeeze or through_walls
 	var target := (from + offset).clamp(Vector2i.ZERO, Vector2i(grid - 1, grid - 1))
 	var x_step := Vector2i(signi(target.x - from.x), 0)
 	var y_step := Vector2i(0, signi(target.y - from.y))
@@ -726,7 +728,7 @@ func jump_landing(from: Vector2i, offset: Vector2i) -> Vector2i:
 		if not is_blocked(target) and target not in crates:
 			for first: Vector2i in [x_step, y_step]:
 				var corner := from + first
-				if _can_cross(from, corner, squeeze) and _can_cross(corner, target, squeeze):
+				if _can_cross(from, corner, through) and _can_cross(corner, target, through):
 					return target
 		for first: Vector2i in [x_step, y_step]:
 			if _mouse_can_step(from, from + first):
@@ -734,7 +736,7 @@ func jump_landing(from: Vector2i, offset: Vector2i) -> Vector2i:
 		return from
 	var step := x_step + y_step
 	var at := from
-	while at != target and _can_cross(at, at + step, squeeze):
+	while at != target and _can_cross(at, at + step, through):
 		at += step
 	while at != from and (is_blocked(at) or at in crates):
 		at -= step

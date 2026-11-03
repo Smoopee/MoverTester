@@ -7,7 +7,13 @@ var dir: Card.Dir = Card.Dir.UP
 ## Slot effect the card carries into every slot. It plays after the slot's own effect.
 var stamp: CardSlot.Effect = CardSlot.Effect.NONE
 ## What the card is made of, which pays out each time it plays (main.gd _play_material).
-var material: Items.CardMaterial = Items.CardMaterial.NONE
+var material: Items.CardMaterial = Items.CardMaterial.NONE:
+	set(value):
+		if value != material:
+			copper_plays = 0
+		material = value
+## Times a COPPER card has played this run, which its points grow by (copper_points).
+var copper_plays := 0
 ## Cells a STRIDE stamp moves, 1 to CardSlot.MAX_STRIDE. The player picks it on the card, and it
 ## stays picked.
 var stride := 1
@@ -45,7 +51,19 @@ static func sorted(cards: Array[CardData]) -> Array[CardData]:
 func copy() -> CardData:
 	var card := CardData.new(dir, stamp, material)
 	card.stride = stride
+	card.copper_plays = copper_plays
 	return card
+
+
+## Points a COPPER card adds the next time it plays.
+func copper_points() -> int:
+	return Score.COPPER_POINTS + copper_plays * Score.COPPER_GROWTH
+
+
+## The material's description, with what a COPPER card is up to.
+func material_text() -> String:
+	var text: String = Items.MATERIALS[material][1]
+	return text + " Next play: +%d." % copper_points() if material == Items.CardMaterial.COPPER else text
 
 
 ## Card name with its material and stamp, like "UP+LEAP", "GOLD UP" or "WOOD UP+STRIDE 3".
