@@ -87,8 +87,12 @@ const KEY := Color("f2c94c")
 const KEY_EDGE := Color("8a6a12")
 const CRATE := Color("c08a52")
 const CRATE_EDGE := Color("6b4423")
-const PAD := Color("f08c2e")
-const PAD_EDGE := Color("9c4f0f")
+## A jump pad's springy plate, on a base of MACHINE steel, and the arrow on it.
+const PAD := Color("8ccf3a")
+const PAD_EDGE := Color("4a7a18")
+const PAD_ARROW := Color("f6ffe6")
+## How far a jump pad's plate springs up as it throws the mouse, in pixels.
+const PAD_SPRING := 3.0
 ## Colors of the switches, by index into plates: each plate and the gates it opens.
 const SWITCH_COLORS: Array[Color] = [Color("d9483b"), Color("3a74d0"), Color("2e9457")]
 ## How faded an open gate is drawn.
@@ -247,6 +251,12 @@ var _pushed := -1
 var _push_shift := Vector2.ZERO:
 	set(value):
 		_push_shift = value
+		queue_redraw()
+## The jump pad that just threw the mouse, and how far its plate is sprung up, 1 to 0.
+var _sprung := Vector2i(-1, -1)
+var _spring := 0.0:
+	set(value):
+		_spring = value
 		queue_redraw()
 ## The previewed way the mouse goes this turn, as a trail, and how it ends (see show_preview).
 var _preview: Array[Vector2i] = []
@@ -688,7 +698,7 @@ func step(dir: Card.Dir, wrap := false) -> bool:
 
 
 ## Moves the mouse in a straight line until it hits a wall, a gap, a crate, a trap, a cat's path, glue,
-## a mouse hole (which it then goes down) or the cheese. With a key in hand it opens a locked door on
+## a mouse hole (which it then goes down), a jump pad (which then throws it) or the cheese. With a key in hand it opens a locked door on
 ## the way. Sliding into a crate right next to the mouse pushes it a cell, like a step.
 func slide(dir: Card.Dir) -> bool:
 	var offset: Vector2i = Card.OFFSETS[dir]
@@ -698,7 +708,8 @@ func slide(dir: Card.Dir) -> bool:
 	var start := mouse_cell
 	var passed: Array[Vector2i] = []
 	while _mouse_can_step(mouse_cell, mouse_cell + offset, true) and mouse_cell != cheese_cell and not is_caught() \
-			and (passed.is_empty() or (mouse_cell not in glue and _hole_exit(mouse_cell) == mouse_cell)):
+			and (passed.is_empty() or (mouse_cell not in glue and _hole_exit(mouse_cell) == mouse_cell
+				and not _pad_throws(mouse_cell))):
 		_unlock(mouse_cell, mouse_cell + offset)
 		mouse_cell += offset
 		passed.append(mouse_cell)
@@ -878,7 +889,7 @@ func _ride() -> bool:
 			_sound(Sfx.Sound.BELT)
 			tween = create_tween()
 			tween.tween_property(self, "mouse_pos", Vector2(mouse_cell), CONVEYOR_TIME)
-		elif pads.has(mouse_cell) and jump_landing(mouse_cell, pads[mouse_cell]) != mouse_cell:
+		elif _pad_throws(mouse_cell):
 			var pad := mouse_cell
 			facing = Card.OFFSETS.find_key(pads[pad].sign()) as Card.Dir
 			mouse_cell = jump_landing(pad, pads[pad])
@@ -886,6 +897,10 @@ func _ride() -> bool:
 			popped_out = false
 			_sound(Sfx.Sound.PAD)
 			tween = _hop_tween()
+			if animate:
+				_sprung = pad
+				create_tween().tween_property(self, "_spring", 0.0, JUMP_TIME).from(1.0) \
+					.set_trans(Tween.TRANS_ELASTIC).set_ease(Tween.EASE_OUT)
 		else:
 			break
 		await _settle(tween)
@@ -918,6 +933,11 @@ func _hole_exit(cell: Vector2i) -> Vector2i:
 	if index == -1 or (index ^ 1) >= holes.size():
 		return cell
 	return holes[index ^ 1]
+
+
+## True when the cell has a jump pad with room to throw the mouse somewhere.
+func _pad_throws(cell: Vector2i) -> bool:
+	return pads.has(cell) and jump_landing(cell, pads[cell]) != cell
 
 
 ## Moves the cat onto the mouse.
@@ -1107,19 +1127,7 @@ func _draw_floor() -> void:
 			draw_rect(plate.grow(-4), color.lightened(0.15))
 		draw_rect(plate, color.darkened(0.4), false, 1.5)
 	for cell: Vector2i in pads:
-		# A round pad with an arrowhead on its rim pointing the way it throws, and the cells it throws in
-		# the middle.
-		var center := _cell_center(Vector2(cell))
-		var offset: Vector2i = pads[cell]
-		draw_set_transform_matrix(_view * Transform2D(Card.ANGLES[Card.OFFSETS.find_key(offset.sign())], center))
-		draw_colored_polygon(PackedVector2Array([Vector2(-7, -8), Vector2(0, -14.5), Vector2(7, -8)]), PAD_EDGE)
-		draw_set_transform_matrix(_view)
-		draw_circle(center, 10.5, PAD_EDGE)
-		draw_circle(center, 9.0, PAD)
-		var font := ThemeDB.fallback_font
-		var text := str(absi(offset.x + offset.y))
-		var at := center + Vector2(-font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, 14).x / 2.0, 5)
-		draw_string(font, at, text, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color.WHITE)
+		_draw_pad(cell)
 	for cell in floorboards:
 		var plank := Rect2(Vector2(cell) * CELL, Vector2(CELL, CELL)).grow(-2)
 		draw_rect(plank, PLANK)
@@ -1172,6 +1180,49 @@ func _draw_floor() -> void:
 			draw_colored_polygon(_ellipse(center + blob[0], blob[1]), GLUE)
 		draw_circle(center + Vector2(-6, -2), 2.0, Color(1, 1, 1, 0.9))
 		draw_circle(center + Vector2(6, -5), 1.2, Color(1, 1, 1, 0.9))
+
+
+## Draws a jump pad: a round spring plate on a steel base with an arrow the way it throws, and a faint
+## dotted arc to the cell it lands on.
+func _draw_pad(cell: Vector2i) -> void:
+	var center := _cell_center(Vector2(cell))
+	var offset: Vector2i = pads[cell]
+	var landing := jump_landing(cell, offset)
+	if landing != cell:
+		_draw_pad_arc(center, _cell_center(Vector2(landing)))
+	draw_colored_polygon(_ellipse(center + Vector2(1.5, 2.5), Vector2(12, 11)), SHADOW)
+	draw_colored_polygon(_ellipse(center + Vector2(0, 1), Vector2(12, 11)), MACHINE_EDGE)
+	draw_colored_polygon(_ellipse(center + Vector2(0, 0.5), Vector2(11, 10)), MACHINE)
+	# The plate stands up off the base on its spring, and higher for a moment as it throws.
+	var lift := 2.0 + (PAD_SPRING * _spring if cell == _sprung else 0.0)
+	var top := center - Vector2(0, lift)
+	draw_colored_polygon(_ellipse(center, Vector2(8.5, 7.5)), PAD_EDGE)
+	draw_rect(Rect2(top.x - 8.5, top.y, 17, lift), PAD_EDGE)
+	draw_colored_polygon(_ellipse(top, Vector2(8.5, 7.5)), PAD)
+	draw_colored_polygon(_ellipse(top + Vector2(-2.5, -2.5), Vector2(3.5, 2)), PAD.lightened(0.4))
+	var dir: Card.Dir = Card.OFFSETS.find_key(offset.sign())
+	draw_set_transform_matrix(_view * Transform2D(Card.ANGLES[dir], top))
+	var arrow := PackedVector2Array([Vector2(0, -6.5), Vector2(5, -1), Vector2(2, -1), Vector2(2, 5),
+		Vector2(-2, 5), Vector2(-2, -1), Vector2(-5, -1)])
+	draw_colored_polygon(arrow, PAD_ARROW)
+	arrow.append(arrow[0])
+	draw_polyline(arrow, PAD_EDGE, 1.0, true)
+	draw_set_transform_matrix(_view)
+
+
+## Draws a jump pad's throw: dots arcing over a sideways throw (or out to the right of one up or down)
+## from the pad's edge to a ring on the landing cell.
+func _draw_pad_arc(from: Vector2, to: Vector2) -> void:
+	var color := Color(PAD_EDGE, 0.55)
+	var bulge := Vector2.UP if is_equal_approx(from.y, to.y) else Vector2.RIGHT
+	var control := (from + to) / 2.0 + bulge * from.distance_to(to) * 0.25
+	var dots := int(from.distance_to(to) / 6.0)
+	for i in range(1, dots):
+		var t := float(i) / dots
+		var point := from.lerp(control, t).lerp(control.lerp(to, t), t)
+		if point.distance_to(from) > 13.0 and point.distance_to(to) > 8.0:
+			draw_circle(point, 1.3, color)
+	draw_arc(to, 6.0, 0.0, TAU, 20, color, 1.5, true)
 
 
 ## Draws the chasms as one dark pit, with a rocky rim and a cliff face along each side that meets the
