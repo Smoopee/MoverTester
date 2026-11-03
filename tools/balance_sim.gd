@@ -267,7 +267,7 @@ func _best_dir(pos: Vector2i) -> Card.Dir:
 
 
 func _refresh_distances() -> void:
-	to_cheese = board.distances_from(board.cheese_cell)
+	to_cheese = board.distances_from(board.cheese_cell, false, Board.Belts.TO)
 
 
 ## Steps from the cell to the cheese, or the straight distance from a cell the path search can't reach
