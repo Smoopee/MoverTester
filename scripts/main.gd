@@ -162,6 +162,8 @@ var busy := false
 var discards_left := DISCARDS_PER_ROUND
 ## Crumbs picked up on the board this round.
 var round_crumbs := 0
+## Crumbs GOLD cards paid this round.
+var gold_crumbs := 0
 ## This round's score and the target it needs (see Score), and the points and mult this turn has
 ## made so far, added to the score at the end of the turn (_bank_turn).
 var round_score := 0
@@ -368,6 +370,7 @@ func new_round() -> void:
 	if run.has(Items.Trinket.WASTEBASKET):
 		discards_left += WASTEBASKET_DISCARDS
 	round_crumbs = 0
+	gold_crumbs = 0
 	round_score = 0
 	score_target = Score.target(run.round_number, run.boss != -1)
 	turn_points = 0
@@ -537,6 +540,8 @@ func _play_cards(order: Array[CardSlot], preview := false) -> int:
 				slot.number, card.data.label(), partner_slot.number,
 				CardSlot.INFO[partner_slot.effect][0], partner.data.label(), board.mouse_cell])
 			partner.modulate = PLAYED
+			if not preview:
+				_play_material(partner)
 		else:
 			ended = await _play(slot, card)
 			# Facing is the last direction moved, which differs from the card for WILD, GAMBLE, etc.
@@ -544,6 +549,8 @@ func _play_cards(order: Array[CardSlot], preview := false) -> int:
 				" ".join(PackedStringArray([CardSlot.INFO[slot.effect][0], card.data.label()])).strip_edges(),
 				" (moved %s)" % Card.NAMES[board.facing] if board.facing != card.dir else "",
 				board.mouse_cell])
+		if not preview:
+			_play_material(card)
 		if ended and _survive_trap():
 			ended = false
 		if card.modulate == PLAYING:
@@ -658,6 +665,8 @@ func _end_round() -> void:
 			lines.append("Score %d, short of %d  +0" % [round_score, score_target])
 		if round_crumbs > 0:
 			lines.append("Crumbs picked up  +%d" % round_crumbs)
+		if gold_crumbs > 0:
+			lines.append("Gold cards  +%d" % gold_crumbs)
 		for chest in chest_rewards:
 			lines.append("Chest  %s" % chest)
 		run.crumbs += earned
@@ -739,18 +748,30 @@ func _on_mouse_moved(motion: Board.Motion, cells: int) -> void:
 	_refresh_hud()
 
 
-## Adds the mult that goes by how the cards played, the slots in played: SHINY stamps, SHOW-OFF for
-## each slot effect and stamp, and DAREDEVIL when they left the mouse next to a trap, a cat or a cat's
-## path.
+## Pays out a card's material as it plays, where the mouse is: WOOD points, SHINY mult, GOLD crumbs.
+## The preview's cards pay nothing.
+func _play_material(card: Card) -> void:
+	match card.data.material:
+		Items.CardMaterial.WOOD:
+			_add_points(Score.WOOD_POINTS, board.mouse_cell)
+		Items.CardMaterial.SHINY:
+			turn_mult += Score.SHINY_MULT
+			_pop_mult("+%d mult" % Score.SHINY_MULT)
+		Items.CardMaterial.GOLD:
+			run.crumbs += Items.GOLD_CRUMBS
+			gold_crumbs += Items.GOLD_CRUMBS
+			if board.animate:
+				ScorePopup.spawn(self, board.cell_global_center(board.mouse_cell) + Vector2(0, 18),
+					"+%d crumb" % Items.GOLD_CRUMBS, 0.3)
+		_:
+			return
+	BugReport.note("  %s card paid out" % Items.MATERIALS[card.data.material][0])
+	_refresh_hud()
+
+
+## Adds the mult that goes by how the cards played, the slots in played: SHOW-OFF for each slot effect
+## and stamp, and DAREDEVIL when they left the mouse next to a trap, a cat or a cat's path.
 func _score_cards(played: Array[CardSlot]) -> void:
-	var shiny := 0
-	for slot in played:
-		var card := slot.get_card()
-		if card and card.stamp == CardSlot.Effect.SHINY:
-			shiny += 1
-	if shiny > 0:
-		turn_mult += shiny * Score.SHINY_MULT
-		_pop_mult("+%d mult" % (shiny * Score.SHINY_MULT))
 	if run.has_skill(Items.Skill.SHOW_OFF):
 		var effects := 0
 		for slot in played:

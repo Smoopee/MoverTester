@@ -76,6 +76,7 @@ var _skill_boxes := {}
 var _slot_effects: Array[OptionButton] = []
 var _card_dir := OptionButton.new()
 var _card_stamp: OptionButton
+var _card_material := OptionButton.new()
 var _peek := Label.new()
 
 
@@ -408,6 +409,12 @@ func _build_cards_tab(box: VBoxContainer) -> void:
 	_card_stamp = _effect_dropdown()
 	_card_stamp.tooltip_text = "Stamp. Any effect, including ones the shop doesn't sell."
 	row.add_child(_card_stamp)
+	for material: Items.CardMaterial in Items.CardMaterial.values():
+		_card_material.add_item(Items.MATERIALS[material][0] if material in Items.MATERIALS else "(no material)",
+			material)
+	_card_material.tooltip_text = "Material."
+	_card_material.focus_mode = Control.FOCUS_NONE
+	row.add_child(_card_material)
 	row = _row(box)
 	_button(row, "Add to hand", _add_card.bind(false)).tooltip_text = "Only for this round."
 	_button(row, "Add to deck", _add_card.bind(true)).tooltip_text = \
@@ -751,7 +758,8 @@ func _set_slot_effect(index: int, slot: int) -> void:
 func _add_card(keep: bool) -> void:
 	if not _idle():
 		return
-	var data := CardData.new(_card_dir.selected as Card.Dir, _card_stamp.selected as CardSlot.Effect)
+	var data := CardData.new(_card_dir.selected as Card.Dir, _card_stamp.selected as CardSlot.Effect,
+		_card_material.selected as Items.CardMaterial)
 	var in_hand := game.add_card(data, keep)
 	if not keep and not in_hand:
 		_say("There's no hand between rounds.")

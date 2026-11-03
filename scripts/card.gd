@@ -51,8 +51,14 @@ const HOLD_COLOR := Color(0.878, 0.478, 0.373, 0.5)
 ## Stamps set by clicking the stamp band on a card in play.
 const SET_STAMPS: Array[CardSlot.Effect] = [CardSlot.Effect.STRIDE, CardSlot.Effect.SWIVEL]
 ## Stamps that don't play after the slot's effect, so their tooltips don't say they do.
-const QUIET_STAMPS: Array[CardSlot.Effect] = [CardSlot.Effect.SWIVEL, CardSlot.Effect.STEADY,
-	CardSlot.Effect.SHINY]
+const QUIET_STAMPS: Array[CardSlot.Effect] = [CardSlot.Effect.SWIVEL, CardSlot.Effect.STEADY]
+## The card's face for each material (Items.CardMaterial), which _draw_material then patterns.
+const FACES := {
+	Items.CardMaterial.NONE: Color("f4ecd8"),
+	Items.CardMaterial.WOOD: Color("e2bf8e"),
+	Items.CardMaterial.SHINY: Color("e2f1fb"),
+	Items.CardMaterial.GOLD: Color("f2d16a"),
+}
 
 ## The deck card this node shows. Set it, or dir, before adding the node to the tree.
 var data := CardData.new()
@@ -81,17 +87,22 @@ func _ready() -> void:
 	set_process(false)
 	mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	_restyle()
+	var tips := PackedStringArray()
 	if stamp != CardSlot.Effect.NONE:
-		tooltip_text = "%s stamp: %s" % [CardSlot.INFO[stamp][0], _stamp_text()]
+		tips.append("%s stamp: %s" % [CardSlot.INFO[stamp][0], _stamp_text()])
+	if data.material != Items.CardMaterial.NONE:
+		tips.append("%s: %s" % [Items.MATERIALS[data.material][0], Items.MATERIALS[data.material][1]])
+	tooltip_text = "\n".join(tips)
 
 
-## Borders the card in its direction's color.
+## Borders the card in its direction's color, on its material's face.
 func _restyle() -> void:
 	var color: Color = COLORS[dir]
-	add_theme_stylebox_override("normal", _make_style(Color("f4ecd8"), color))
-	add_theme_stylebox_override("hover", _make_style(Color("fffaf0"), color))
-	add_theme_stylebox_override("pressed", _make_style(Color("e6dcc4"), color))
-	add_theme_stylebox_override("disabled", _make_style(Color("f4ecd8"), color))
+	var face: Color = FACES[data.material]
+	add_theme_stylebox_override("normal", _make_style(face, color))
+	add_theme_stylebox_override("hover", _make_style(face.lerp(Color.WHITE, 0.5), color))
+	add_theme_stylebox_override("pressed", _make_style(face.darkened(0.06), color))
+	add_theme_stylebox_override("disabled", _make_style(face, color))
 
 
 func _stamp_text() -> String:
@@ -106,14 +117,23 @@ func resize(value: Vector2) -> void:
 	queue_redraw()
 
 
+## The stamp's tip over the material's, for whichever the card has.
 func _make_custom_tooltip(_for_text: String) -> Object:
-	var info: Array = CardSlot.INFO[stamp]
-	return CardSlot.make_tooltip(info[0], info[2], _stamp_text(), "STAMP")
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 10)
+	if stamp != CardSlot.Effect.NONE:
+		var info: Array = CardSlot.INFO[stamp]
+		box.add_child(CardSlot.make_tooltip(info[0], info[2], _stamp_text(), "STAMP"))
+	if data.material != Items.CardMaterial.NONE:
+		var info: Array = Items.MATERIALS[data.material]
+		box.add_child(CardSlot.make_tooltip(info[0], info[3], info[1], "MATERIAL"))
+	return box
 
 
 func _draw() -> void:
 	var color: Color = COLORS[dir]
 	var zoom := size.x / CARD_SIZE.x
+	_draw_material(zoom)
 	draw_set_transform(Vector2(size.x / 2, size.y * 0.42), ANGLES[dir], Vector2.ONE * zoom)
 	draw_colored_polygon(PackedVector2Array(ARROW_POINTS), color)
 	draw_set_transform(Vector2.ZERO)
@@ -132,6 +152,41 @@ func _draw() -> void:
 		fill.bg_color = HOLD_COLOR
 		fill.set_corner_radius_all(8)
 		draw_style_box(fill, Rect2(0, size.y - filled, size.x, filled))
+
+
+## Patterns the face for the card's material, under the arrow: grain for WOOD, a sheen for SHINY,
+## sparkles for GOLD.
+func _draw_material(zoom: float) -> void:
+	var inner := Rect2(Vector2(6, 6), size - Vector2(12, 12))
+	match data.material:
+		Items.CardMaterial.WOOD:
+			var grain := Color("9c6a38", 0.45)
+			for i in 5:
+				var y := size.y * (0.14 + 0.18 * i)
+				var points := PackedVector2Array()
+				for step in 9:
+					var t := step / 8.0
+					points.append(Vector2(lerpf(inner.position.x, inner.end.x, t), y + sin(t * TAU + i * 1.7) * 2 * zoom))
+				draw_polyline(points, grain, 1.5 * zoom, true)
+			draw_arc(Vector2(size.x * 0.74, size.y * 0.72), 4 * zoom, 0, TAU, 16, grain, 1.5 * zoom, true)
+		Items.CardMaterial.SHINY:
+			var sheen := Color(1, 1, 1, 0.7)
+			for band: Array in [[0.55, 0.15, 0.13], [0.8, 0.4, 0.05]]:
+				var top: float = size.x * band[0]
+				var bottom: float = size.x * band[1]
+				var width: float = size.x * band[2]
+				draw_colored_polygon(PackedVector2Array([Vector2(top, inner.position.y),
+						Vector2(top + width, inner.position.y), Vector2(bottom + width, inner.end.y),
+						Vector2(bottom, inner.end.y)]), sheen)
+		Items.CardMaterial.GOLD:
+			draw_rect(inner, Color("b8862a", 0.6), false, 1.5 * zoom)
+			for at: Vector2 in [Vector2(0.2, 0.27), Vector2(0.82, 0.24), Vector2(0.8, 0.66), Vector2(0.22, 0.7)]:
+				var c := at * size
+				var r := 4.5 * zoom
+				var points := PackedVector2Array()
+				for i in 8:
+					points.append(c + Vector2.from_angle(i * PI / 4) * (r if i % 2 == 0 else r * 0.3))
+				draw_colored_polygon(points, Color(1, 1, 0.92, 0.9))
 
 
 func _stamp_font_size() -> int:

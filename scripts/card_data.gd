@@ -1,19 +1,23 @@
 class_name CardData
 extends RefCounted
-## A card in the deck: its direction and any stamp bought for it in the shop. Piles hold these, and a
-## Card node shows one.
+## A card in the deck: its direction and any stamp and material bought for it in the shop. Piles hold
+## these, and a Card node shows one.
 
 var dir: Card.Dir = Card.Dir.UP
 ## Slot effect the card carries into every slot. It plays after the slot's own effect.
 var stamp: CardSlot.Effect = CardSlot.Effect.NONE
+## What the card is made of, which pays out each time it plays (main.gd _play_material).
+var material: Items.CardMaterial = Items.CardMaterial.NONE
 ## Cells a STRIDE stamp moves, 1 to CardSlot.MAX_STRIDE. The player picks it on the card, and it
 ## stays picked.
 var stride := 1
 
 
-func _init(card_dir: Card.Dir = Card.Dir.UP, card_stamp: CardSlot.Effect = CardSlot.Effect.NONE) -> void:
+func _init(card_dir: Card.Dir = Card.Dir.UP, card_stamp: CardSlot.Effect = CardSlot.Effect.NONE,
+		card_material: Items.CardMaterial = Items.CardMaterial.NONE) -> void:
 	dir = card_dir
 	stamp = card_stamp
+	material = card_material
 
 
 ## Sets the STRIDE stamp to move one more cell, back to 1 after CardSlot.MAX_STRIDE.
@@ -27,23 +31,27 @@ func swivel() -> void:
 	dir = Card.OFFSETS.find_key(Vector2i(-offset.y, offset.x)) as Card.Dir
 
 
-## The cards sorted by direction, then stamp, so a listing doesn't give away the draw order.
+## The cards sorted by direction, then stamp, then material, so a listing doesn't give away the draw
+## order.
 static func sorted(cards: Array[CardData]) -> Array[CardData]:
 	var result := cards.duplicate()
 	result.sort_custom(func(a: CardData, b: CardData) -> bool:
-		return a.dir < b.dir or (a.dir == b.dir and a.stamp < b.stamp))
+		if a.dir != b.dir:
+			return a.dir < b.dir
+		return a.stamp < b.stamp or (a.stamp == b.stamp and a.material < b.material))
 	return result
 
 
 func copy() -> CardData:
-	var card := CardData.new(dir, stamp)
+	var card := CardData.new(dir, stamp, material)
 	card.stride = stride
 	return card
 
 
-## Card name with its stamp, like "UP+LEAP" or "UP+STRIDE 3".
+## Card name with its material and stamp, like "UP+LEAP", "GOLD UP" or "WOOD UP+STRIDE 3".
 func label() -> String:
-	return Card.NAMES[dir] + ("+" + stamp_name() if stamp != CardSlot.Effect.NONE else "")
+	var text: String = Card.NAMES[dir] + ("+" + stamp_name() if stamp != CardSlot.Effect.NONE else "")
+	return "%s %s" % [Items.MATERIALS[material][0], text] if material != Items.CardMaterial.NONE else text
 
 
 ## The stamp's name, with the cells for STRIDE, like "STRIDE 3".

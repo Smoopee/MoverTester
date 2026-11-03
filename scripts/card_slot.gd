@@ -14,8 +14,6 @@ enum Effect {
 	ECHO, LAST, BLOCKED, SNIFF, STEADY,
 	# Change the deck.
 	RECYCLE, BURN, COPY,
-	# Change the score.
-	SHINY,
 }
 
 const DIRECTION_COLOR := Color("6fb3ff")
@@ -26,8 +24,8 @@ const BLOCKED_COLOR := Color("e06060")
 ## Most cells a STRIDE stamp can be set to move (CardData.stride).
 const MAX_STRIDE := 4
 ## Effects only stamps have, which slots never roll. Each needs the card it's on: STRIDE and SWIVEL
-## are set on the card, STEADY ignores the slot, SHINY goes with the card.
-const STAMP_ONLY: Array[Effect] = [Effect.STRIDE, Effect.SWIVEL, Effect.STEADY, Effect.SHINY]
+## are set on the card and STEADY ignores the slot.
+const STAMP_ONLY: Array[Effect] = [Effect.STRIDE, Effect.SWIVEL, Effect.STEADY]
 ## Name, description and color of each effect.
 const INFO := {
 	Effect.NONE: ["", "", Color(1, 1, 1, 0.35)],
@@ -54,7 +52,6 @@ const INFO := {
 	Effect.RECYCLE: ["RECYCLE", "This card comes back to your hand next turn.", DECK_COLOR],
 	Effect.BURN: ["BURN", "Moves 3 cells, then the card is gone for the rest of the round.", DECK_COLOR],
 	Effect.COPY: ["COPY", "Adds a copy of this card to your deck.", DECK_COLOR],
-	Effect.SHINY: ["SHINY", "Score: +%d mult for the turn when the card plays." % Score.SHINY_MULT, Score.COLOR],
 }
 
 var number := 1

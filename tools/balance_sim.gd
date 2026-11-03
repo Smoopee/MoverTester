@@ -9,7 +9,8 @@ extends SceneTree
 ## (alley_king, runaway_cheese, kitchen_light): then every round is that boss, each on a fresh run.
 ## --slots N and --hand N start every run with that many card slots and cards in hand (boss wins add more, but bosses are off by default).
 ## --trinkets a,b starts every run with those trinkets (butter_pat, ride_ticket, ...), and --skills a,b
-## with those skills (show_off, daredevil, ...), to see what they do to the score.
+## with those skills (show_off, daredevil, ...), to see what they do to the score. --materials a,b makes
+## the starting deck's cards those materials (wood, shiny, gold), taking turns.
 
 const MAX_TURNS := 200
 
@@ -26,6 +27,8 @@ var hand_size := 0
 var trinkets: Array[int] = []
 ## Items.Skill values each run starts with, at most Items.SKILL_SLOTS.
 var skills: Array[int] = []
+## Items.CardMaterial values the starting deck's cards are made of, in turn.
+var materials: Array[int] = []
 ## Rounds that had a chest, and chests opened.
 var chest_rounds := 0
 var chests_opened := 0
@@ -88,6 +91,15 @@ func _initialize() -> void:
 						quit(1)
 						return
 					trinkets.append(trinket)
+			"--materials":
+				for material_name in args[i + 1].split(","):
+					var material: int = Items.CardMaterial.get(material_name.to_upper(), -1)
+					if material == -1:
+						printerr("Unknown material %s, expected some of %s" % [material_name,
+							Items.CardMaterial.keys()])
+						quit(1)
+						return
+					materials.append(material)
 			"--skills":
 				for skill_name in args[i + 1].split(","):
 					var skill: int = Items.Skill.get(skill_name.to_upper(), -1)
@@ -114,7 +126,7 @@ func _run() -> void:
 	main.bosses_enabled = false
 	main.force_boss = boss
 	if boss != -1 or fixed_round > 0 or slot_count > 0 or hand_size > 0 or not trinkets.is_empty() \
-			or not skills.is_empty():
+			or not skills.is_empty() or not materials.is_empty():
 		_new_run()
 	for r in rounds:
 		if r > 0:
@@ -137,6 +149,10 @@ func _new_run() -> void:
 		main.run.trinkets.assign(trinkets)
 		main.run.skills.assign(skills)
 		main.refresh_ui()
+	if not materials.is_empty():
+		var cards: Array[CardData] = main.run.deck.cards
+		for i in cards.size():
+			cards[i].material = materials[i % materials.size()] as Items.CardMaterial
 	if fixed_round > 1:
 		main.run.round_number = fixed_round - 1
 		main.new_round()

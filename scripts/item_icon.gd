@@ -1,9 +1,9 @@
 class_name ItemIcon
 extends Texture2D
-## A small symbol for a trinket, skill, consumable or card stamp, drawn in code in the item's color.
-## It's a texture, so it goes wherever one does: Button.icon, TextureRect.
+## A small symbol for a trinket, skill, consumable, card stamp or card material, drawn in code in the
+## item's color. It's a texture, so it goes wherever one does: Button.icon, TextureRect.
 
-enum Kind { TRINKET, SKILL, CONSUMABLE, STAMP }
+enum Kind { TRINKET, SKILL, CONSUMABLE, STAMP, MATERIAL }
 
 const SIZE := 18
 ## The symbols are drawn in a box this wide, centred on the origin, then scaled to fit.
@@ -11,7 +11,7 @@ const BOX := 24.0
 const ELLIPSE_POINTS := 20
 
 var kind: Kind
-## Items.Trinket, Items.Skill, Items.Consumable or CardSlot.Effect, depending on kind.
+## Items.Trinket, Items.Skill, Items.Consumable, CardSlot.Effect or Items.CardMaterial, depending on kind.
 var id: int
 var color: Color
 ## Width and height in pixels.
@@ -38,6 +38,10 @@ static func consumable(consumable_id: Items.Consumable, px := SIZE) -> ItemIcon:
 
 static func stamp(effect: CardSlot.Effect, px := SIZE) -> ItemIcon:
 	return _make(Kind.STAMP, effect, CardSlot.INFO[effect][2], px)
+
+
+static func card_material(material_id: Items.CardMaterial, px := SIZE) -> ItemIcon:
+	return _make(Kind.MATERIAL, material_id, Items.MATERIALS[material_id][3], px)
 
 
 static func _make(icon_kind: Kind, icon_id: int, icon_color: Color, px: int) -> ItemIcon:
@@ -89,6 +93,8 @@ func _paint(to_canvas_item: RID, rect: Rect2, modulate: Color) -> void:
 			_draw_consumable(id, dark)
 		Kind.STAMP:
 			_draw_stamp(dark)
+		Kind.MATERIAL:
+			_draw_material(id, dark)
 
 
 func _draw_trinket(trinket_id: int, dark: Color) -> void:
@@ -252,6 +258,31 @@ func _draw_stamp(dark: Color) -> void:
 	_rect(Rect2(-8, 0, 16, 4.5), color)
 	_rect(Rect2(-8, 3, 16, 1.5), dark)
 	_line([Vector2(-9.5, 8), Vector2(9.5, 8)], 1.6, color)
+
+
+## A card made of the material, patterned as Card draws it.
+func _draw_material(material_id: int, dark: Color) -> void:
+	var card := Rect2(-7, -10, 14, 20)
+	_rect(card, color)
+	match material_id:
+		Items.CardMaterial.WOOD:
+			# Grain and a knot.
+			for y: float in [-6.0, -1.5, 3.0, 7.5]:
+				_line([Vector2(-5.5, y), Vector2(-2, y - 1), Vector2(2, y + 1), Vector2(5.5, y)], 1.1, dark)
+			_circle(Vector2(2.5, 1.5), 1.6, dark)
+		Items.CardMaterial.SHINY:
+			# A streak of light across it, and a glint off the corner.
+			_polygon([Vector2(1, -10), Vector2(5, -10), Vector2(-1, 10), Vector2(-5, 10)], Color(1, 1, 1, 0.75))
+			_star(Vector2(8, -9), 3.5, Color.WHITE)
+		Items.CardMaterial.GOLD:
+			# A rim, and a sparkle in the middle.
+			_line([card.position + Vector2(2, 2), Vector2(card.end.x - 2, card.position.y + 2),
+					card.end - Vector2(2, 2), Vector2(card.position.x + 2, card.end.y - 2),
+					card.position + Vector2(2, 2)], 1.2, dark)
+			var sparkle: Array[Vector2] = []
+			for i in 8:
+				sparkle.append(Vector2.from_angle(i * PI / 4) * (5.5 if i % 2 == 0 else 1.6))
+			_polygon(sparkle, Color(1, 1, 0.92))
 
 
 ## Points along a circle from angle `from` to angle `to`.

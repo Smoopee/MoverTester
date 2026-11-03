@@ -49,7 +49,8 @@ at most one per turn (BLOCKED), or never when it would break the game (BURN with
 Cards can carry a slot effect as a shop **stamp** (`Items.STAMPS`), played through
 `CardSlot.effect_for()`. If the new effect works on one card with no extra input (no direction pick,
 no dependence on slot order), consider adding it to `STAMPS`. Direction effects don't belong there,
-because a stamped direction card is just another direction card.
+because a stamped direction card is just another direction card. Stamps change how a card moves: an
+effect that only changes the score is a card material (`Items.CardMaterial`), not a slot effect.
 
 ## 5. Check
 1. The PostToolUse hook parse-checks each edited `.gd` file. Fix anything it reports.
