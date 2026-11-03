@@ -19,6 +19,9 @@ signal cell_clicked(cell: Vector2i, side: Card.Dir)
 signal mouse_moved(motion: Motion, cells: int)
 
 enum Motion { STEP, SLIDE, JUMP, RIDE, BUMP }
+## How distances_from takes the conveyors: as the mouse rides them away from the start cell (FROM), as
+## it rides them to the start cell (TO), or not at all (IGNORE), as the cats walk.
+enum Belts { FROM, TO, IGNORE }
 
 ## Cells along each side of the biggest board. Early rounds use a smaller one (see Difficulty.grid).
 const MAX_GRID := 20
@@ -171,7 +174,8 @@ var traps: Array[Vector2i] = []
 ## no more this turn (see stuck).
 var glue: Array[Vector2i] = []
 ## Conveyor cells and the way each one runs. A move that ends on one carries the mouse a cell that
-## way, and on along the belt if that's another conveyor.
+## way, and on along the belt if that's another conveyor. Belts are one-way: the mouse can't move onto
+## a conveyor against it (see against_belt).
 var conveyors: Dictionary[Vector2i, Card.Dir] = {}
 ## Mouse holes in linked pairs: holes[0] with holes[1], holes[2] with holes[3], and so on. A move
 ## that ends on one pops the mouse out of the other.
@@ -465,8 +469,11 @@ func step_target(cell: Vector2i, dir: Card.Dir) -> Vector2i:
 
 
 ## Steps from start to each cell it can reach, going around walls (or through them, with
-## through_walls) and traps. Cells it can't reach are left out.
-func distances_from(start: Vector2i, through_walls := false) -> Dictionary[Vector2i, int]:
+## through_walls) and traps. Cells it can't reach are left out. With belts FROM, the mouse can't move
+## onto a conveyor against it, and a conveyor only leads on the way it runs, unless something stops
+## the ride there; with TO, the same rules give the steps from each cell to start. A ride counts a
+## step a cell, as if walked, so a belt never shortens the way.
+func distances_from(start: Vector2i, through_walls := false, belts := Belts.FROM) -> Dictionary[Vector2i, int]:
 	# _can_step, inlined: laying out a round runs this a few hundred times.
 	var closed: Dictionary[Vector2i, bool] = {}
 	for cells: Array[Vector2i] in [traps, broken, chasms]:
@@ -475,6 +482,16 @@ func distances_from(start: Vector2i, through_walls := false) -> Dictionary[Vecto
 	for hazard in hazards:
 		closed[hazard.cell] = true
 	var offsets: Array = Card.OFFSETS.values()
+	var belted := belts != Belts.IGNORE and not conveyors.is_empty()
+	# The way each conveyor carries the mouse on, if the ride goes on from it.
+	var rides: Dictionary[Vector2i, Vector2i] = {}
+	if belted:
+		for cell: Vector2i in conveyors:
+			var flow: Vector2i = Card.OFFSETS[conveyors[cell]]
+			var next := cell + flow
+			if _in_bounds(next) and not closed.has(next) and not against_belt(cell, next) \
+					and (through_walls or not is_barrier(cell, next)):
+				rides[cell] = flow
 	var distances: Dictionary[Vector2i, int] = {start: 0}
 	var queue: Array[Vector2i] = [start]
 	var i := 0
@@ -490,6 +507,12 @@ func distances_from(start: Vector2i, through_walls := false) -> Dictionary[Vecto
 			if not through_walls:
 				var edge := Vector3i(mini(cell.x, next.x), mini(cell.y, next.y), 0 if cell.y == next.y else 1)
 				if walls.has(edge) or doors.has(edge) or gates.has(edge) and not is_pressed(gates[edge]):
+					continue
+			if belted:
+				# The move this is, from a to b.
+				var a := cell if belts == Belts.FROM else next
+				var b := next if belts == Belts.FROM else cell
+				if against_belt(a, b) or rides.has(a) and rides[a] != b - a:
 					continue
 			distances[next] = steps
 			queue.append(next)
@@ -633,7 +656,8 @@ func step(dir: Card.Dir, wrap := false) -> bool:
 		tween.tween_property(self, "mouse_pos", Vector2(target), STEP_TIME)
 		if _pushed != -1:
 			tween.parallel().tween_property(self, "_push_shift", Vector2.ZERO, STEP_TIME)
-	elif (wrap or warp) and not _in_bounds(target) and not is_blocked(wrapped) and wrapped not in crates:
+	elif (wrap or warp) and not _in_bounds(target) and not is_blocked(wrapped) and wrapped not in crates \
+			and not (conveyors.has(wrapped) and Card.OFFSETS[conveyors[wrapped]] == -offset):
 		target = wrapped
 		_trail_break()
 		mouse_cell = target
@@ -884,7 +908,7 @@ func _pounce(cat: Cat) -> void:
 ## through walls, doors or gates (even open ones, which can shut before the cat walks). Hunters head
 ## for the mouse, around the walls and traps.
 func plan_cats() -> void:
-	var to_mouse := distances_from(mouse_cell)
+	var to_mouse := distances_from(mouse_cell, false, Belts.IGNORE)
 	var distance := func(cell: Vector2i) -> int: return to_mouse.get(cell, grid * grid)
 	for cat in cats:
 		cat.plan(func(from: Vector2i, cell: Vector2i) -> bool:
@@ -939,8 +963,14 @@ func _mouse_can_step(from: Vector2i, to: Vector2i, keyed := false) -> bool:
 
 ## Like _mouse_can_step, keyed, but a crate on the cell is fine: for pushing it.
 func _mouse_can_reach(from: Vector2i, to: Vector2i, keyed := true) -> bool:
-	return _can_step(from, to, squeeze) or keyed and keys_held > 0 and not is_blocked(to) and _in_bounds(to) \
-		and doors.has(wall_between(from, to))
+	return not against_belt(from, to) and (_can_step(from, to, squeeze) or keyed and keys_held > 0 \
+		and not is_blocked(to) and _in_bounds(to) and doors.has(wall_between(from, to)))
+
+
+## True when moving from a cell onto its neighbor goes against the conveyor there, which the mouse
+## can't do.
+func against_belt(from: Vector2i, to: Vector2i) -> bool:
+	return conveyors.has(to) and Card.OFFSETS[conveyors[to]] == from - to
 
 
 ## True when a crate can be pushed from a cell onto its neighbor: plain floor or a plate, with no wall,

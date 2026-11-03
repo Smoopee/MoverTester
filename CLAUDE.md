@@ -84,10 +84,19 @@ pass over).
   trap. Some are thrown across a chasm as a shortcut (see Chasms).
 - **Mouse holes**, in linked pairs (`holes[0]` with `holes[1]`, ...): pop out of the other one.
   Slides stop on one (and go down it); jumps pass over it.
-- **Conveyor belts**: carry the mouse a cell the belt's way, and on along the belt. Never placed
-  to push into a wall, off the board or onto a trap.
+- **Conveyor belts**: carry the mouse a cell the belt's way, and on along the belt. They're
+  one-way: the mouse can't step or slide onto a belt against it (`Board.against_belt`, a BUMP).
+  A belt is a run of 3 up to `BELT_SPAN` of the board's side that turns a corner at most once
+  (`main.gd` `_belt_run`), started near the way to the cheese, and kept as the best of `BELT_TRIES`
+  (`_place_belts`): with `BELT_CURRENT_CHANCE` a **current** that makes the way longer (at least
+  `BELT_CURRENT_DETOUR` steps, the currents together at most `BELT_DETOUR` of the side), else a
+  **highway** whose ride saves at least `BELT_SAVING` steps (`_belt_saving`). A belt that does
+  neither is left out, and none leaves a cell the mouse can't get back from. Never placed to push
+  into a wall, off the board or onto a trap.
 
-These chain (`Board._ride`); the pathfinding ignores them (and glue).
+These chain (`Board._ride`). The pathfinding ignores holes, pads and glue, but takes belts as
+one-way: `Board.distances_from` with `Belts.FROM` (from a cell) or `Belts.TO` (to it, as the turn
+limit, SNIFF and the sim bot use), counting a ride a step a cell; cats use `Belts.IGNORE`.
 
 ### Multi-step puzzles: a shut shortcut
 Locked doors and switches (`main.gd` `_place_locks`). Each door or gate sits in a short run of wall,
@@ -197,8 +206,8 @@ pays `Boss.WIN_CRUMBS`, adds a card slot and a card in hand, and offers a free t
   cell, so they hop over traps, cat paths and crumbs, but they stop short of walls
   (`jump_landing`). `walls` is a set of `Vector3i(x, y, 0 right / 1 below)` edge keys
   (`wall_between`, `has_wall`), as are `doors` and `gates`; `squeeze` lets the mouse through all three. `step_target` is where a step
-  lands and `distances_from` is a BFS around walls and traps (turn limit, SNIFF, the Alley King,
-  wall generation, the sim bot). Crumbs emit `crumb_collected`, chests `chest_opened`, keys
+  lands and `distances_from` is a BFS around walls and traps, with belts one-way (turn limit, SNIFF,
+  the Alley King, wall generation, the sim bot). Crumbs emit `crumb_collected`, chests `chest_opened`, keys
   `key_collected`, and a door a key opens `door_unlocked`. `clear_layout` empties the floor tiles,
   chasms, doors, keys, switches, chests, pylons and flamethrowers before a round is laid out. `move_cats()`
   walks the cats at the end of a turn, `move_cheese()` runs the cheese for RUNAWAY CHEESE;
