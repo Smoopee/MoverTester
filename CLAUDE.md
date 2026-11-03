@@ -80,7 +80,9 @@ pass over).
 
 ### Movement options: carry the mouse farther
 - **Jump pads** (`pads`, cell -> offset): throw the mouse 2-4 cells the way the pad's arrow points,
-  as a jump (`Board.jump_landing`). Only placed where the whole throw is clear and doesn't land on a
+  as a jump (`Board.jump_landing`). Slides stop on one (and get thrown); jumps pass over it. Drawn as
+  a round spring plate with an arrow, and a faint dotted arc to a ring on the cell it lands on
+  (`Board._draw_pad`). Only placed where the whole throw is clear and doesn't land on a
   trap. Some are thrown across a chasm as a shortcut (see Chasms).
 - **Mouse holes**, in linked pairs (`holes[0]` with `holes[1]`, ...): pop out of the other one.
   Slides stop on one (and go down it); jumps pass over it.
