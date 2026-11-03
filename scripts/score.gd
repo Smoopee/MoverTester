@@ -29,7 +29,8 @@ const RIDE_TICKET_MULT := 2
 const HARD_HEAD_MULT := 1
 const SHOW_OFF_MULT := 1
 const DAREDEVIL_TIMES := 2
-## Mult a card with the SHINY stamp adds when it plays.
+## Card materials (Items.CardMaterial): points a WOOD card and mult a SHINY card add each time it plays.
+const WOOD_POINTS := 2
 const SHINY_MULT := 2
 const COLOR := Color("8fd3ff")
 

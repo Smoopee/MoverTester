@@ -1,16 +1,16 @@
 class_name Shop
 extends Control
-## Overlay between rounds where crumbs buy trinkets, skills, consumables and card stamps. Opens after
-## each won round; Next Round closes it and starts the next one.
+## Overlay between rounds where crumbs buy trinkets, skills, consumables, card stamps and card materials.
+## Opens after each won round; Next Round closes it and starts the next one.
 
 signal next_round_pressed
 
-enum Kind { TRINKET, SKILL, CONSUMABLE, STAMP }
+enum Kind { TRINKET, SKILL, CONSUMABLE, STAMP, MATERIAL }
 
 const OFFERS_PER_ROW := 2
-const OFFER_SIZE := Vector2(200, 112)
-## The sections (trinkets, skills, consumables, stamps) are laid out in a grid this many wide.
-const SECTION_COLUMNS := 2
+const OFFER_SIZE := Vector2(170, 112)
+## The sections (trinkets, skills, consumables, stamps, materials) are laid out in a grid this many wide.
+const SECTION_COLUMNS := 3
 const PICKER_COLUMNS := 6
 const ICON_SIZE := 22
 ## Height of a Buy button on a touchscreen, sized for a finger.
@@ -23,7 +23,7 @@ const REROLL_PRICE := 5
 ## One thing for sale this visit.
 class Offer:
 	var kind: Kind
-	## Items.Trinket, Items.Skill, Items.Consumable or CardSlot.Effect, depending on kind.
+	## Items.Trinket, Items.Skill, Items.Consumable, CardSlot.Effect or Items.CardMaterial, depending on kind.
 	var id: int
 	var price: int
 	var sold := false
@@ -32,7 +32,7 @@ class Offer:
 
 var _run: Run
 var _offers: Array[Offer] = []
-## The stamp offer whose card is being picked, or null.
+## The stamp or material offer whose card is being picked, or null.
 var _pending: Offer
 ## After a boss: the trinkets on offer are free, and taking one takes the others off the shelf.
 var _free_trinket := false
@@ -108,7 +108,8 @@ func _ready() -> void:
 	_add_section(Kind.TRINKET, "Trinkets", "")
 	_add_section(Kind.SKILL, "Skills", "")
 	_add_section(Kind.CONSUMABLE, "Consumables", "")
-	_add_section(Kind.STAMP, "Card stamps", "Puts an effect on one card for good.")
+	_add_section(Kind.STAMP, "Card stamps", "Changes how one card moves, for good.")
+	_add_section(Kind.MATERIAL, "Card materials", "Changes what one card pays when it plays.")
 
 	_picker.add_theme_constant_override("separation", 12)
 	_picker_title.add_theme_font_size_override("font_size", 18)
@@ -149,6 +150,7 @@ func open(run: Run, free_trinket := false) -> void:
 	_next_button.text = "Boss Round" if boss_next else "Next Round"
 	_fill_row(Kind.CONSUMABLE, Items.Consumable.values())
 	_fill_row(Kind.STAMP, Items.STAMPS.duplicate())
+	_fill_row(Kind.MATERIAL, Items.MATERIALS.keys())
 	close_picker()
 	BugReport.note("Shop opened with %d crumbs" % run.crumbs)
 	show()
@@ -177,6 +179,8 @@ func _add_section(kind: Kind, title: String, hint: String) -> void:
 		_:
 			hint_label = Label.new()
 	hint_label.text = hint
+	# Wraps under the title rather than widen the section past its offers.
+	hint_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	hint_label.size_flags_vertical = Control.SIZE_SHRINK_END
 	hint_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	hint_label.modulate = Color(1, 1, 1, 0.6)
@@ -354,6 +358,9 @@ func _info(offer: Offer) -> Array:
 			return Items.SKILLS[offer.id] + [Items.SKILL_COLOR]
 		Kind.CONSUMABLE:
 			return Items.CONSUMABLES[offer.id] + [Items.CONSUMABLE_COLOR]
+		Kind.MATERIAL:
+			var material: Array = Items.MATERIALS[offer.id]
+			return ["%s CARD" % material[0], material[1], material[2], material[3]]
 	var effect: Array = CardSlot.INFO[offer.id]
 	return ["%s STAMP" % effect[0], effect[1], Items.stamp_price(offer.id), effect[2]]
 
@@ -366,6 +373,8 @@ func _icon(offer: Offer) -> ItemIcon:
 			return ItemIcon.skill(offer.id, ICON_SIZE)
 		Kind.CONSUMABLE:
 			return ItemIcon.consumable(offer.id, ICON_SIZE)
+		Kind.MATERIAL:
+			return ItemIcon.card_material(offer.id, ICON_SIZE)
 	return ItemIcon.stamp(offer.id, ICON_SIZE)
 
 
@@ -390,7 +399,7 @@ func _buy(offer: Offer) -> void:
 			if _run.pouch.size() >= Items.POUCH_SIZE:
 				return
 			_run.pouch.append(offer.id)
-		Kind.STAMP:
+		Kind.STAMP, Kind.MATERIAL:
 			_open_picker(offer)
 			return
 	_sell(offer, "")
@@ -404,31 +413,40 @@ func _sell(offer: Offer, detail: String) -> void:
 	refresh()
 
 
-## Swaps the offers for a grid of the deck's cards to put the stamp on. Nothing is paid until one is
-## picked.
+## Swaps the offers for a grid of the deck's cards to put the stamp or material on. Nothing is paid
+## until one is picked.
 func _open_picker(offer: Offer) -> void:
 	_pending = offer
-	_picker_title.text = "Pick a card for the %s stamp. A card that already has one gets the new one." % \
-			CardSlot.INFO[offer.id][0]
+	var stamp := offer.kind == Kind.STAMP
+	if stamp:
+		_picker_title.text = "Pick a card for the %s stamp. A card that already has one gets the new one." % \
+				CardSlot.INFO[offer.id][0]
+	else:
+		_picker_title.text = "Pick a card to make %s. A card made of something else gets the new material." % \
+				Items.MATERIALS[offer.id][0]
 	for child in _picker_grid.get_children():
 		_picker_grid.remove_child(child)
 		child.queue_free()
 	for data in CardData.sorted(_run.deck.cards):
 		var card := Card.new()
 		card.data = data
-		# Already has this stamp: buying it again would change nothing.
-		card.disabled = data.stamp == offer.id
-		card.pressed.connect(_apply_stamp.bind(data))
+		# Already has it: buying it again would change nothing.
+		card.disabled = (data.stamp if stamp else data.material) == offer.id
+		card.pressed.connect(_apply_offer.bind(data))
 		_picker_grid.add_child(card)
 	_sections.hide()
 	_next_button.hide()
 	_picker.show()
 
 
-func _apply_stamp(data: CardData) -> void:
+## Puts the stamp or material being bought on the picked card.
+func _apply_offer(data: CardData) -> void:
 	var offer := _pending
 	var old := data.label()
-	data.stamp = offer.id as CardSlot.Effect
+	if offer.kind == Kind.STAMP:
+		data.stamp = offer.id as CardSlot.Effect
+	else:
+		data.material = offer.id as Items.CardMaterial
 	close_picker()
 	_sell(offer, " on %s" % old)
 

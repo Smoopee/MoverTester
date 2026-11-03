@@ -1,7 +1,8 @@
 class_name Items
 extends RefCounted
 ## What the shop sells: trinkets (passive for the rest of the run), skills (always on, held in the
-## SKILL_SLOTS slots above the card slots), consumables (held in the pouch, used once) and card stamps.
+## SKILL_SLOTS slots above the card slots), consumables (held in the pouch, used once), card stamps
+## (which change how a card moves) and card materials (which change what it pays when it plays).
 
 ## A trinket is an object the mouse carries and does what that object would; a skill is a trait of
 ## the mouse itself (see CLAUDE.md).
@@ -10,6 +11,8 @@ enum Trinket {
 	# Score trinkets (see Score).
 	BUTTER_PAT, RIDE_TICKET,
 }
+## What a card is made of. It pays out each time the card plays, whatever the slot does.
+enum CardMaterial { NONE, WOOD, SHINY, GOLD }
 enum Consumable { FRESH_BREEZE, CALM, NEW_PAWS, CHEESE_BAIT, SQUEEZE }
 enum Skill {
 	WARP, EFFICIENT, THICK_FUR,
@@ -58,12 +61,22 @@ const SKILL_SLOTS := 4
 ## effects would just make it another direction card. Some are stamps only (CardSlot.STAMP_ONLY).
 const STAMPS: Array[CardSlot.Effect] = [
 	CardSlot.Effect.DOUBLE, CardSlot.Effect.LEAP, CardSlot.Effect.SLIDE, CardSlot.Effect.STRIDE,
-	CardSlot.Effect.SWIVEL, CardSlot.Effect.STEADY, CardSlot.Effect.SHINY, CardSlot.Effect.RECYCLE,
+	CardSlot.Effect.SWIVEL, CardSlot.Effect.STEADY, CardSlot.Effect.RECYCLE,
 ]
 const STAMP_PRICE := 6
 ## Stamps that cost something other than STAMP_PRICE.
 const STAMP_PRICES := {
 	CardSlot.Effect.SWIVEL: 9,
+}
+## Crumbs a GOLD card pays each time it plays.
+const GOLD_CRUMBS := 1
+## Name, description, price and color of each card material the shop sells.
+const MATERIALS := {
+	CardMaterial.WOOD: ["WOOD", "Score: +%d points each time the card plays." % Score.WOOD_POINTS, 4,
+		Color("d29b62")],
+	CardMaterial.SHINY: ["SHINY", "Score: +%d mult for the turn each time the card plays." % Score.SHINY_MULT, 6,
+		Color("9fd8ff")],
+	CardMaterial.GOLD: ["GOLD", "+%d crumb each time the card plays." % GOLD_CRUMBS, 8, Color("f5c542")],
 }
 ## Consumables the player can hold at once.
 const POUCH_SIZE := 3

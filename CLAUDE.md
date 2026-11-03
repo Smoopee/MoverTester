@@ -151,7 +151,8 @@ Beating round `Run.GOAL_ROUNDS` (21, a boss round) wins the run (`main.gd` `won_
 panel offers Endless, which goes on to the shop and sets `Run.endless` (the difficulty keeps
 climbing to its caps), or New Run. The HUD shows "Round N of 21", then "Endless round N". A won round pays crumbs (`WIN_CRUMBS` + unused discards + the score bonus, plus
 crumbs picked up on the board), then opens the **shop**. It sells trinkets (passive for the run),
-skills, consumables (held in the pouch, used once) and card stamps (a slot effect stuck on one card).
+skills, consumables (held in the pouch, used once), card stamps (a slot effect stuck on one card) and
+card materials.
 The trinket and skill rows each have a Reroll button (`shop.gd` `_reroll`): the first reroll in a
 visit costs `Shop.REROLL_PRICE` (5) crumbs and each one after costs 5 more, counted across both rows. A
 stamped card plays its slot's effect first, then its stamp (`main.gd` `_play`): a BURN slot with a
@@ -159,6 +160,15 @@ SLIDE stamp moves 3 cells, then slides. A burned card stays burned whatever its 
 are stamps only, never rolled on a slot (`CardSlot.STAMP_ONLY`). Some are set by clicking the stamp
 band on a card in play (`Card.SET_STAMPS`, stored on the `CardData`), and STEADY makes the card ignore
 its slot: read a slot's effect on a card through `main.gd` `_slot_effect` / `_play_dir`.
+
+**Stamps change how a card moves; materials change what it pays.** A card's **material**
+(`Items.CardMaterial`, `Items.MATERIALS` name / description / price / color, stored on the `CardData`)
+pays out each time the card plays, whatever its slot or stamp does (`main.gd` `_play_material`, called
+from `_play_cards` for each card that plays, never in the preview): WOOD adds `Score.WOOD_POINTS` (2)
+points, SHINY `Score.SHINY_MULT` (2) mult and GOLD `Items.GOLD_CRUMBS` (1) crumb. A card has at most
+one stamp and one material; buying a new one replaces the old. Each material gives the card its own
+face (`Card.FACES`, patterned in `Card._draw_material`). A new effect that only changes the score is a
+material, not a stamp.
 
 Each round also has a **score** (`scripts/score.gd` `Score`, `main.gd` `round_score`), kept apart from
 crumbs, which are money. Each turn adds up points (`Score.CELL_POINTS` a cell walked, slid or
@@ -239,21 +249,21 @@ pays `Boss.WIN_CRUMBS`, adds a card slot and a card in hand, and offers a free t
   constants (cadence, reward, per-boss numbers).
 - `scripts/card.gd` — `Card`: the node for a card, with drag-and-drop. `dir` and `stamp` forward to
   its `data`.
-- `scripts/card_data.gd` — `CardData`: a deck card's direction and stamp. Piles hold these.
+- `scripts/card_data.gd` — `CardData`: a deck card's direction, stamp and material. Piles hold these.
 - `scripts/deck.gd` — `Deck`: the run's `cards`, and the round's draw and discard piles built from them.
 - `scripts/run.gd` — `Run`: state that lasts a run (deck, slots, hand size, round number, crumbs, trinkets,
   skills, pouch, this and the next boss, bosses beaten).
-- `scripts/items.gd` — `Items`: shop content, meaning the `Trinket`, `Skill` and `Consumable` enums
-  with name / description / price tables, and the `STAMPS` the shop offers.
-- `scripts/item_icon.gd` — `ItemIcon`: a `Texture2D` that draws a trinket's, skill's, consumable's or
-  stamp's symbol in code (`ItemIcon.trinket(id)`, ...), so it works as a `Button.icon` or in a
-  `TextureRect`. A new trinket, skill or consumable needs a symbol in `_draw_trinket` / `_draw_skill`
-  / `_draw_consumable`.
+- `scripts/items.gd` — `Items`: shop content, meaning the `Trinket`, `Skill`, `Consumable` and
+  `CardMaterial` enums with name / description / price tables, and the `STAMPS` the shop offers.
+- `scripts/item_icon.gd` — `ItemIcon`: a `Texture2D` that draws a trinket's, skill's, consumable's,
+  stamp's or material's symbol in code (`ItemIcon.trinket(id)`, ...), so it works as a `Button.icon` or
+  in a `TextureRect`. A new trinket, skill, consumable or material needs a symbol in `_draw_trinket` /
+  `_draw_skill` / `_draw_consumable` / `_draw_material`.
 - `scripts/skill_slot.gd` — `SkillSlot`: one of the skill slots in `%SkillRow` above the card slots,
   drawn as a squarer card with the skill's symbol and name (or empty). `flash()` lights it up when its
   skill does something.
 - `scripts/shop.gd` — `Shop`: overlay after a won round. Rolls offers, rerolls the trinket and skill
-  rows, sells them, and picks the card for a stamp.
+  rows, sells them, and picks the card for a stamp or material.
 - `scripts/touch_tips.gd` — `TouchTips`: hold-to-show tooltips on a touchscreen (see Touch above).
 - `scripts/pile_button.gd` — `PileButton`: the draw and discard piles either side of the hand, drawn
   as a card stack with a count (card back / skull). The discard pile also takes dropped cards.
@@ -293,7 +303,8 @@ The sim lets runs go on, so it prints win/loss rates per round number (the diffi
 `--slots N` / `--hand N` to start every run with that many slots / cards in hand. The round table
 also shows the bot's mean score in won rounds against the target. The bot plays for the cheese, not the
 score, so its score is a floor. `--trinkets butter_pat,ride_ticket` starts every run with those
-trinkets, and `--skills show_off,daredevil` with those skills.
+trinkets, `--skills show_off,daredevil` with those skills, and `--materials wood,gold` makes the
+starting deck's cards those materials, taking turns.
 
 A new `class_name` script isn't visible to the parse check until Godot refreshes its class cache:
 `"/c/Program Files/Godot/godot.exe" --headless --path . --import`.
