@@ -54,8 +54,10 @@ var plain_gain := 0
 var plain_turns := 0
 ## Cards the bot placed this turn.
 var placed := 0
-## Steps from each cell to the cheese around the walls and traps, refreshed each turn (see _dist).
+## Steps from each cell to the target around the walls and traps, refreshed each turn (see _dist).
 var to_cheese: Dictionary[Vector2i, int] = {}
+## Where the bot heads: the cheese, or the nearest key while the cheese is behind a locked door.
+var target := Vector2i.ZERO
 
 
 func _initialize() -> void:
@@ -158,13 +160,15 @@ func _play_round() -> void:
 			return
 		var used := _place_cards()
 		var before := _distance()
+		var for_key := _key_target()
 		for slot: CardSlot in main.slots:
 			effect_stats[slot.effect][0] += 1
 		await main.lock_in()
 		var won: bool = main.win_panel.visible and not main.lost()
 		# The cheese can have run (RUNAWAY CHEESE).
 		_refresh_distances()
-		var gain := before - _distance()
+		# Picking up a key turns the bot to the cheese, which says nothing about the cards.
+		var gain := before - _distance() if _key_target() == for_key else 0
 		if used.is_empty() and placed > 0:
 			plain_gain += gain
 			plain_turns += 1
@@ -266,14 +270,35 @@ func _best_dir(pos: Vector2i) -> Card.Dir:
 	return best
 
 
+## Heads for the cheese. While only a locked door is in the way, goes through it with a key in hand,
+## else heads for the nearest key.
 func _refresh_distances() -> void:
-	to_cheese = board.distances_from(board.cheese_cell, false, Board.Belts.TO)
+	target = board.cheese_cell
+	to_cheese = board.distances_from(target, false, Board.Belts.TO)
+	if to_cheese.has(board.mouse_cell) or board.doors.is_empty():
+		return
+	var through := board.distances_from(target, false, Board.Belts.TO, Board.Locks.DOORS_OPEN)
+	if not through.has(board.mouse_cell):
+		return
+	if board.keys_held > 0:
+		to_cheese = through
+		return
+	var from_mouse := board.distances_from(board.mouse_cell)
+	for key in board.keys:
+		if from_mouse.has(key) and (target == board.cheese_cell or from_mouse[key] < from_mouse[target]):
+			target = key
+	to_cheese = board.distances_from(target, false, Board.Belts.TO)
 
 
-## Steps from the cell to the cheese, or the straight distance from a cell the path search can't reach
+## The key the bot is heading for, or (-1, -1) while it heads for the cheese.
+func _key_target() -> Vector2i:
+	return target if target != board.cheese_cell else Vector2i(-1, -1)
+
+
+## Steps from the cell to the target, or the straight distance from a cell the path search can't reach
 ## (a trap).
 func _dist(cell: Vector2i) -> int:
-	return to_cheese.get(cell, main._distance(cell, board.cheese_cell))
+	return to_cheese.get(cell, main._distance(cell, target))
 
 
 func _distance() -> int:
