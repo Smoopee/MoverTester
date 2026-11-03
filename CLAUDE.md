@@ -98,11 +98,23 @@ These chain (`Board._ride`). The pathfinding ignores holes, pads and glue, but t
 one-way: `Board.distances_from` with `Belts.FROM` (from a cell) or `Belts.TO` (to it, as the turn
 limit, SNIFF and the sim bot use), counting a ride a step a cell; cats use `Belts.IGNORE`.
 
-### Multi-step puzzles: a shut shortcut
-Locked doors and switches (`main.gd` `_place_locks`). Each door or gate sits in a short run of wall,
-kept from `LOCK_TRIES` tries as the one that makes the way to the cheese longest while it's shut, and
-like walls it never cuts a cell off: opening it is a shortcut. Doors and shut gates are walls to
-everything (`Board.is_barrier`), and the turn limit counts them as shut.
+### Multi-step puzzles: a shut way
+Locked doors and switches (`main.gd` `_place_locks`, switches first). Every lock has a job
+(`LockJob`), tried in this order, and a lock that fits none is left out:
+- **VAULT**: it shuts the one way into the dead end the round's chest is in (`_vault_lock`).
+- **GOAL** (a door only, in a round that rolls `LOCK_GOAL_CHANCE`): it's the only way to the cheese.
+  Never a gate, since a crate stuck in a corner would shut the cheese away for good.
+- **SHORTCUT**: going through it saves at least `LOCK_MIN_SAVING` steps on the way to the cheese,
+  counting the trip to its key or crate. A shortcut that later layout (machines, belts) leaves saving
+  less is taken out with its key or crate (`_drop_idle_shortcuts`).
+
+A GOAL or SHORTCUT lock sits in a short run of wall (`_lock_run`), the best of `LOCK_TRIES`: half
+random runs, half plugging an edge the way to the cheese crosses (`_plug_run`). Each is judged with the
+lock shut and the other locks open (`Board.Locks`). Keys, plates and crates are always in reach with every lock
+shut, nothing laid later (machines, belts, floorboards, mouse holes) can shut one away or lead round a
+lock, and the cells either side of each lock are kept clear (`_kept_clear`). Doors and shut gates are
+walls to everything (`Board.is_barrier`). The turn limit counts them as shut, except a GOAL door,
+which it counts by the nearest key (`_path_distance`, which SNIFF and the sim bot also go by).
 - **Keys and locked doors** (`keys`, `doors`): walking or sliding over a key picks it up
   (`keys_held`, shown next to the HUD, for this round only). Walking or sliding into a door with a
   key uses the key and opens the door for good (`Board._unlock`). Jumps stop short of doors.
@@ -110,7 +122,7 @@ everything (`Board.is_barrier`), and the turn limit counts them as shut.
   a crate (`crates`). A gate is open while a crate or the mouse is on its plate (`is_pressed`). The
   mouse pushes a crate by stepping into it, onto plain floor or a plate (`_crate_can_enter`); slides
   stop short of a crate (or push one right next to the mouse) and jumps don't land on one. Each crate
-  starts in a straight line from its plate with the lane kept clear (`_crate_lanes`), and no plate is
+  starts in a straight line from its plate with the lane kept clear (`_kept_clear`), and no plate is
   next to its gate. Cats never walk through gates, open or not, or onto crates.
 
 **Difficulty** (`scripts/difficulty.gd`) rises with the round number: the first two rounds are a

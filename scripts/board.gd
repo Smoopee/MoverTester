@@ -22,6 +22,9 @@ enum Motion { STEP, SLIDE, JUMP, RIDE, BUMP }
 ## How distances_from takes the conveyors: as the mouse rides them away from the start cell (FROM), as
 ## it rides them to the start cell (TO), or not at all (IGNORE), as the cats walk.
 enum Belts { FROM, TO, IGNORE }
+## How distances_from takes the locked doors and gates: as they are (SHUT, a gate open while its plate
+## is pressed), with the doors open, as with a key in hand (DOORS_OPEN), or with all of them open (OPEN).
+enum Locks { SHUT, DOORS_OPEN, OPEN }
 
 ## Cells along each side of the biggest board. Early rounds use a smaller one (see Difficulty.grid).
 const MAX_GRID := 20
@@ -472,8 +475,10 @@ func step_target(cell: Vector2i, dir: Card.Dir) -> Vector2i:
 ## through_walls) and traps. Cells it can't reach are left out. With belts FROM, the mouse can't move
 ## onto a conveyor against it, and a conveyor only leads on the way it runs, unless something stops
 ## the ride there; with TO, the same rules give the steps from each cell to start. A ride counts a
-## step a cell, as if walked, so a belt never shortens the way.
-func distances_from(start: Vector2i, through_walls := false, belts := Belts.FROM) -> Dictionary[Vector2i, int]:
+## step a cell, as if walked, so a belt never shortens the way. locks says which locked doors and gates
+## are open.
+func distances_from(start: Vector2i, through_walls := false, belts := Belts.FROM,
+		locks := Locks.SHUT) -> Dictionary[Vector2i, int]:
 	# _can_step, inlined: laying out a round runs this a few hundred times.
 	var closed: Dictionary[Vector2i, bool] = {}
 	for cells: Array[Vector2i] in [traps, broken, chasms]:
@@ -506,7 +511,8 @@ func distances_from(start: Vector2i, through_walls := false, belts := Belts.FROM
 				continue
 			if not through_walls:
 				var edge := Vector3i(mini(cell.x, next.x), mini(cell.y, next.y), 0 if cell.y == next.y else 1)
-				if walls.has(edge) or doors.has(edge) or gates.has(edge) and not is_pressed(gates[edge]):
+				if walls.has(edge) or locks == Locks.SHUT and doors.has(edge) \
+						or locks != Locks.OPEN and gates.has(edge) and not is_pressed(gates[edge]):
 					continue
 			if belted:
 				# The move this is, from a to b.

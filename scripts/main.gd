@@ -76,12 +76,25 @@ const PAD_MIN := 2
 const PAD_MAX := 4
 ## A flamethrower is only placed pointing a way its jet reaches at least this many cells.
 const FLAME_MIN := 2
-## Runs of wall tried for each locked door or gate (see _place_locks). The one that makes the way to the
-## cheese longest while shut is kept.
+## What a locked door or gate is there for (see _place_locks): a quicker way to the cheese, a chest
+## shut away, or the only way to the cheese.
+enum LockJob { SHORTCUT, VAULT, GOAL }
+
+## Runs of wall tried for each locked door or gate (see _lock_run). The one that does its job best is
+## kept.
 const LOCK_TRIES := 40
+## A shortcut lock is only laid if going through it saves at least this many steps on the way to the
+## cheese, counting the way by its key or crate.
+const LOCK_MIN_SAVING := 3
+## Chance that one of the round's locked doors is the only way to the cheese.
+const LOCK_GOAL_CHANCE := 0.3
+## Half the cells tried for a shortcut's key, plate and crate are at most this many cells across and
+## down from the lock.
+const LOCK_ITEM_REACH := 4
 ## The most wall segments in a run with a locked door or gate in it.
 const LOCK_RUN_MAX := 5
-## Random cells tried for each key, plate and crate. The one closest to the way there is kept.
+## Random cells tried for each key, and twice as many for each plate and crate, which need room for a
+## lane. The one that adds least to the way is kept.
 const ITEM_TRIES := 30
 ## A crate starts this many cells in a straight line from its plate.
 const CRATE_MIN := 2
@@ -179,8 +192,12 @@ var force_boss := -1
 ## The hidden board the preview plays the turn on (_update_preview).
 var _preview_board := Board.new()
 var _preview_queued := false
-## Cells kept clear while laying out a round: the lines crates get pushed along to their plates.
-var _crate_lanes: Array[Vector2i] = []
+## Cells kept clear while laying out a round: the lines crates get pushed along to their plates, and
+## the cells either side of each locked door and gate.
+var _kept_clear: Array[Vector2i] = []
+## Each SHORTCUT lock laid this round, with its key's cell or its crate lane (see _crate_lane), until
+## _drop_idle_shortcuts checks them.
+var _shortcuts: Dictionary[Vector3i, Array] = {}
 ## Most steps from the mouse to the cheese the walls may make it while laying out a round (see _place_walls).
 var _longest_way := 0
 ## Shows the keys the mouse holds, next to the HUD, in rounds that have doors or keys.
@@ -326,6 +343,7 @@ func new_round() -> void:
 	_place_locks(mouse, cheese, traps)
 	_place_hazards(mouse, cheese, traps)
 	_place_floor(mouse, cheese, traps)
+	_drop_idle_shortcuts(mouse, cheese)
 	var crumbs := _place_crumbs(mouse, cheese, traps)
 	var cats := _place_cats(mouse, cheese, traps)
 	board.place(mouse, cheese, traps, crumbs, cats, run.boss == Boss.Kind.ALLEY_KING, walls)
@@ -1696,9 +1714,9 @@ func _place_pocket(mouse: Vector2i, cheese: Vector2i, traps: Array[Vector2i]) ->
 
 ## Pockets: dead ends (see _dead_end) at least CHEST_MIN_DISTANCE from the mouse that make going by them
 ## on the way to the cheese take CHEST_MIN_DETOUR to CHEST_MAX_DETOUR more steps, given the steps from
-## the mouse to each cell. Maps each to those steps.
+## the mouse to each cell, with the locks open. Maps each to those steps.
 func _pockets(from_mouse: Dictionary[Vector2i, int], mouse: Vector2i, cheese: Vector2i) -> Dictionary[Vector2i, int]:
-	var from_cheese := board.distances_from(cheese, false, Board.Belts.TO)
+	var from_cheese := board.distances_from(cheese, false, Board.Belts.TO, Board.Locks.OPEN)
 	var spacing := mini(CHEST_MIN_DISTANCE, board.grid - 2)
 	var pockets: Dictionary[Vector2i, int] = {}
 	for cell in from_mouse:
@@ -1997,16 +2015,17 @@ func _touches_chasm(cell: Vector2i, run_cells: Array[Vector2i]) -> bool:
 	return false
 
 
-## Nooks: the parts of the board, but the cheese's, that a bridge is the only way into from the mouse.
-## Maps the cell in each farthest from the mouse and off the floor tiles, if it's at least
-## CHEST_MIN_DISTANCE from the mouse, to its steps from the mouse.
+## Nooks: the parts of the board, but the cheese's, that a bridge is the only way into from the mouse,
+## with the locks open. Maps the cell in each farthest from the mouse and off the floor tiles, if it's
+## at least CHEST_MIN_DISTANCE from the mouse, to its steps from the mouse.
 func _nooks(mouse: Vector2i, cheese: Vector2i) -> Dictionary[Vector2i, int]:
-	var from_mouse := board.distances_from(mouse)
+	var open := Board.Locks.OPEN
+	var from_mouse := board.distances_from(mouse, false, Board.Belts.FROM, open)
 	var spacing := mini(CHEST_MIN_DISTANCE, board.grid - 2)
 	var nooks: Dictionary[Vector2i, int] = {}
 	for bridge in board.bridges:
 		board.chasms.append(bridge)
-		var shut := board.distances_from(mouse)
+		var shut := board.distances_from(mouse, false, Board.Belts.FROM, open)
 		board.chasms.erase(bridge)
 		if not shut.has(cheese):
 			continue
@@ -2055,107 +2074,271 @@ func _place_chasm_pads(chasms: Array[Array], mouse: Vector2i, cheese: Vector2i) 
 
 
 ## Lays down the round's locked doors, each with a key, and its switches: a gate, the pressure plate
-## that opens it and a crate to push onto the plate. Each door and gate sits in a run of wall (see
-## _lock_run), placed so that while it's shut it cuts no cell off but makes the way to the cheese
-## longer: opening it is a shortcut. Each key, and each plate with its crate, goes where it adds least
-## to the way to its door or gate, out of ITEM_TRIES cells. A plate is never next to its gate, so the
-## mouse needs the crate to keep the gate open. The crate starts in a straight line from the plate, and
-## the cells it's pushed along, and the one the mouse pushes from, are kept clear (_crate_lanes).
+## that opens it and a crate to push onto the plate. Each lock tries the jobs (LockJob) in turn and is
+## laid for the first that fits, or left out:
+## - VAULT: the lock shuts the one way into the dead end the round's chest is in (see _vault_lock).
+## - GOAL, in a round that rolls LOCK_GOAL_CHANCE, until one door fits it: the lock is the only way to
+##   the cheese. Never a gate: a crate pushed into a corner would shut the cheese away for good.
+## - SHORTCUT: going through the lock saves at least LOCK_MIN_SAVING steps on the way to the cheese,
+##   counting the way by its key or crate.
+## A GOAL or SHORTCUT lock sits in a run of wall (see _lock_run). Keys, plates and crates are in reach
+## with every lock shut, each where it adds least to the way (see _place_lock). A plate is never next to
+## its gate, so the mouse needs the crate to keep the gate open. The crate starts in a straight line
+## from the plate, and the cells it's pushed along, the one the mouse pushes from, and the cells either
+## side of each lock are kept clear (_kept_clear).
 func _place_locks(mouse: Vector2i, cheese: Vector2i, traps: Array[Vector2i]) -> void:
-	_crate_lanes.clear()
-	var open_cells := board.grid * board.grid - traps.size() - board.chasms.size()
+	_kept_clear.clear()
+	_shortcuts.clear()
 	var free := func(cell: Vector2i) -> bool:
 		return board._in_bounds(cell) and cell != mouse and cell != cheese and cell not in traps \
-			and not board.has_tile(cell) and not board.has_item(cell) and cell not in _crate_lanes
-	for i in Difficulty.doors(run.round_number):
-		var door := _lock_run(mouse, cheese, open_cells)
-		if door == NO_EDGE:
-			break
-		board.doors[door] = true
-		var from_mouse := board.distances_from(mouse)
-		var sides := _edge_cells(door)
-		var from_door := [board.distances_from(sides[0]), board.distances_from(sides[1])]
-		var best := NO_CELL
-		var best_cost := INF
-		for attempt in ITEM_TRIES:
-			var cell := _random_cell()
-			if not free.call(cell) or _distance(cell, mouse) < 2:
-				continue
-			var cost: float = from_mouse.get(cell, INF) + mini(from_door[0].get(cell, 999), from_door[1].get(cell, 999))
-			if cost < best_cost:
-				best = cell
-				best_cost = cost
-		if best == NO_CELL:
-			board.doors.erase(door)
-		else:
-			board.keys.append(best)
+			and not board.has_tile(cell) and not board.has_item(cell) and cell not in _kept_clear
+	# Whether a door still has to be the only way to the cheese.
+	var goal := randf() < LOCK_GOAL_CHANCE
+	# Switches first, so a crate puzzle gets first claim on the chest.
+	for gate: bool in [true, false]:
+		var count := Difficulty.switches(run.round_number) if gate else Difficulty.doors(run.round_number)
+		for i in count:
+			var jobs: Array[LockJob] = [LockJob.VAULT]
+			if not gate and goal:
+				jobs.append(LockJob.GOAL)
+			jobs.append(LockJob.SHORTCUT)
+			for job in jobs:
+				if _place_lock(job, gate, mouse, cheese, free):
+					goal = goal and job != LockJob.GOAL
+					break
 
-	for i in Difficulty.switches(run.round_number):
-		var gate := _lock_run(mouse, cheese, open_cells)
-		if gate == NO_EDGE:
-			break
-		var plate := board.plates.size()
-		board.gates[gate] = plate
-		var from_mouse := board.distances_from(mouse)
-		var sides := _edge_cells(gate)
-		var from_gate := [board.distances_from(sides[0]), board.distances_from(sides[1])]
-		var best: Array[Vector2i] = []
-		var best_cost := INF
-		for attempt in ITEM_TRIES:
+
+## Lays a lock for job (see _place_locks): a gate with its plate and crate, or else a door with its key.
+## Out of ITEM_TRIES cells, the key or crate goes where it adds least to the way (see _item_steps): for
+## a SHORTCUT, on through the lock to the cheese, else to the lock. A lock never takes a key, plate,
+## crate or crate lane out of reach with every lock shut, and a SHORTCUT takes nothing out of reach.
+## Returns false, laying nothing, when the job doesn't fit. free says which cells a key, plate or crate
+## can go on.
+func _place_lock(job: LockJob, gate: bool, mouse: Vector2i, cheese: Vector2i, free: Callable) -> bool:
+	var walls: Array[Vector3i] = []
+	var lock := NO_EDGE
+	if job == LockJob.VAULT:
+		lock = _vault_lock()
+	else:
+		walls = _lock_run(job, mouse, cheese)
+		if not walls.is_empty():
+			lock = walls.pop_back()
+	if lock == NO_EDGE:
+		return false
+	var reach := board.distances_from(mouse)
+	for wall in walls:
+		board.walls[wall] = true
+	var way := _shut_way(lock, mouse, cheese)
+	if gate:
+		board.gates[lock] = board.plates.size()
+	else:
+		board.doors[lock] = true
+	# With every lock shut, so the key or crate is in reach without opening one.
+	var from_mouse := board.distances_from(mouse)
+	var sides := _edge_cells(lock)
+	var onward: Array[Dictionary] = []
+	if job == LockJob.SHORTCUT:
+		onward.append(board.distances_from(cheese, false, Board.Belts.TO, Board.Locks.OPEN))
+	else:
+		onward.append_array([board.distances_from(sides[0]), board.distances_from(sides[1])])
+	var best: Array[Vector2i] = []
+	var best_steps := INF
+	var held: Array[Vector2i] = board.keys + board.plates + board.crates + _kept_clear
+	if not held.any(func(cell: Vector2i) -> bool: return reach.has(cell) and not from_mouse.has(cell)) \
+			and sides.any(func(side: Vector2i) -> bool: return from_mouse.has(side)) \
+			and (job != LockJob.SHORTCUT or from_mouse.size() == reach.size()):
+		for attempt in ITEM_TRIES * (2 if gate else 1):
 			var cell := _random_cell()
-			if not free.call(cell) or sides.any(func(side: Vector2i) -> bool: return _distance(cell, side) < 2):
+			# Half a shortcut's tries are near the lock, where its key or crate costs least.
+			if job == LockJob.SHORTCUT and attempt % 2 == 0:
+				cell = sides.pick_random() + Vector2i(randi_range(-LOCK_ITEM_REACH, LOCK_ITEM_REACH),
+					randi_range(-LOCK_ITEM_REACH, LOCK_ITEM_REACH))
+			if not free.call(cell):
 				continue
-			var lane := _crate_lane(cell, free)
-			if lane.is_empty():
+			var lane: Array[Vector2i] = [cell]
+			if gate:
+				if sides.any(func(side: Vector2i) -> bool: return _distance(cell, side) < 2):
+					continue
+				lane = _crate_lane(cell, free)
+				if lane.is_empty():
+					continue
+			elif _distance(cell, mouse) < 2:
 				continue
-			# Walk behind the crate, push it onto the plate, then go to the gate.
-			var cost: float = from_mouse.get(lane[-1], INF) + lane.size() - 2 \
-				+ mini(from_gate[0].get(cell, 999), from_gate[1].get(cell, 999))
-			if cost < best_cost:
+			var steps := _item_steps(lane, from_mouse, onward)
+			if steps < best_steps:
 				best = lane
-				best_cost = cost
-		if best.is_empty():
-			board.gates.erase(gate)
-			continue
-		board.plates.append(best[0])
-		board.crates.append(best[-2])
-		_crate_lanes.append_array(best.slice(1, -2))
-		_crate_lanes.append(best[-1])
-
-
-## Tries LOCK_TRIES runs of wall (see _wall_run) with a lock (a door or gate) in the middle, and lays
-## the walls of the one that makes the way from the mouse to the cheese longest while the lock is shut,
-## out of those that cut no cell off. Returns the lock's edge, which the caller makes a door or a gate,
-## or NO_EDGE when no run fits.
-func _lock_run(mouse: Vector2i, cheese: Vector2i, open_cells: int) -> Vector3i:
-	var best: Array[Vector3i] = []
-	var best_lock := NO_EDGE
-	var best_gain := -1
-	for attempt in LOCK_TRIES:
-		var walls := _wall_run(false, LOCK_RUN_MAX)
-		if walls.is_empty() or walls.any(func(wall: Vector3i) -> bool:
-				return board.walls.has(wall) or board.doors.has(wall) or board.gates.has(wall)):
-			continue
-		# In the middle of the run, so going round the end of the run takes longer.
-		var lock: Vector3i = walls[randi_range(1, walls.size() - 2)] if walls.size() > 2 else walls.pick_random()
-		for wall in walls:
-			board.walls[wall] = true
-		var shut := board.distances_from(mouse)
-		board.walls.erase(lock)
-		var open := board.distances_from(mouse)
+				best_steps = steps
+	var saving := way - best_steps
+	if best.is_empty() or job == LockJob.SHORTCUT and saving < LOCK_MIN_SAVING:
 		for wall in walls:
 			board.walls.erase(wall)
-		if shut.size() != open_cells:
+		board.doors.erase(lock)
+		board.gates.erase(lock)
+		return false
+	if gate:
+		board.plates.append(best[0])
+		board.crates.append(best[-2])
+		_kept_clear.append_array(best.slice(1, -2))
+		_kept_clear.append(best[-1])
+	else:
+		board.keys.append(best[0])
+	_kept_clear.append_array(sides)
+	if job == LockJob.SHORTCUT:
+		_shortcuts[lock] = best
+	BugReport.note("  %s %s at %s%s" % [LockJob.keys()[job].capitalize(), "gate" if gate else "door", lock,
+		", saves %d steps" % saving if job == LockJob.SHORTCUT else ""])
+	return true
+
+
+## Steps from the mouse to the cheese with the lock shut and the round's other locks open: the way a
+## shortcut through the lock must beat.
+func _shut_way(lock: Vector3i, mouse: Vector2i, cheese: Vector2i) -> int:
+	var plate: int = board.gates.get(lock, -1)
+	var door := board.doors.erase(lock)
+	board.gates.erase(lock)
+	board.walls[lock] = true
+	var way: int = board.distances_from(mouse, false, Board.Belts.FROM, Board.Locks.OPEN).get(cheese, 0)
+	board.walls.erase(lock)
+	if door:
+		board.doors[lock] = true
+	if plate != -1:
+		board.gates[lock] = plate
+	return way
+
+
+## Steps the mouse takes for a lock's key or crate: from its start (from_mouse) to a key on lane[0], or
+## behind a crate on a crate lane (see _crate_lane) and pushing it onto the plate, then on to the
+## nearest of the start cells onward counts steps from.
+func _item_steps(lane: Array[Vector2i], from_mouse: Dictionary[Vector2i, int], onward: Array[Dictionary]) -> float:
+	var there: Vector2i = lane[1] if lane.size() > 1 else lane[0]
+	return from_mouse.get(lane[-1], INF) + maxi(lane.size() - 2, 0) \
+		+ onward.map(func(steps: Dictionary) -> int: return steps.get(there, 999)).min()
+
+
+## Takes each SHORTCUT lock that no longer saves LOCK_MIN_SAVING steps, now the round's machines and
+## floor tiles are laid, off the board with its key, or its plate and crate, leaving a gap in its run of
+## wall. Opening a way never cuts anything off, as walling it up could.
+func _drop_idle_shortcuts(mouse: Vector2i, cheese: Vector2i) -> void:
+	for lock in _shortcuts:
+		var lane: Array[Vector2i] = _shortcuts[lock]
+		var onward: Array[Dictionary] = [board.distances_from(cheese, false, Board.Belts.TO, Board.Locks.OPEN)]
+		var saving := _shut_way(lock, mouse, cheese) - _item_steps(lane, board.distances_from(mouse), onward)
+		if saving >= LOCK_MIN_SAVING:
 			continue
-		var gain: int = shut[cheese] - open[cheese]
-		if gain > best_gain:
+		BugReport.note("  Shortcut %s at %s saves %d steps now: taken out" % [
+			"gate" if board.gates.has(lock) else "door", lock, saving])
+		if board.gates.has(lock):
+			var plate := board.gates[lock]
+			board.gates.erase(lock)
+			board.plates.remove_at(plate)
+			for edge in board.gates:
+				if board.gates[edge] > plate:
+					board.gates[edge] -= 1
+			board.crates.erase(lane[-2])
+		else:
+			board.doors.erase(lock)
+			board.keys.erase(lane[0])
+	_shortcuts.clear()
+
+
+## The edge into the round's chest, for a VAULT lock, if the chest is in a dead end (see _dead_end) with
+## nothing shut across the way in yet. Else NO_EDGE.
+func _vault_lock() -> Vector3i:
+	if board.chests.is_empty() or not _dead_end(board.chests[0]):
+		return NO_EDGE
+	var chest := board.chests[0]
+	for offset: Vector2i in Card.OFFSETS.values():
+		if board._can_step(chest, chest + offset) and chest + offset not in board.traps:
+			return Board.wall_between(chest, chest + offset)
+	return NO_EDGE
+
+
+## Tries LOCK_TRIES runs of wall with a lock in them, and returns the one that does job best, with the
+## lock's edge last, or nothing when none does it. Half are random runs (see _wall_run) with the lock in
+## the middle, and half plug the way to the cheese: the lock on an edge a shortest way crosses, in a run
+## along its grid line (see _plug_run). Each is tried with the lock shut and the round's other locks
+## open. For GOAL, the lock is the only way from the mouse to the cheese, and the best leaves least of
+## the board on the cheese's side. For SHORTCUT, the run cuts no cell off, and the best makes the way to
+## the cheese longest while the lock is shut, by at least LOCK_MIN_SAVING.
+func _lock_run(job: LockJob, mouse: Vector2i, cheese: Vector2i) -> Array[Vector3i]:
+	var from_mouse := board.distances_from(mouse, false, Board.Belts.FROM, Board.Locks.OPEN)
+	var to_cheese := board.distances_from(cheese, false, Board.Belts.TO, Board.Locks.OPEN)
+	var cells := from_mouse.size()
+	var crossings: Array[Vector3i] = []
+	for cell in from_mouse:
+		for offset: Vector2i in Card.OFFSETS.values():
+			var next := cell + offset
+			if from_mouse[cell] + 1 + to_cheese.get(next, cells) == from_mouse[cheese] \
+					and not board.is_barrier(cell, next):
+				crossings.append(Board.wall_between(cell, next))
+	crossings.shuffle()
+	var best: Array[Vector3i] = []
+	var best_lock := NO_EDGE
+	var best_score := 0
+	for attempt in LOCK_TRIES:
+		var walls: Array[Vector3i] = []
+		var lock := NO_EDGE
+		if attempt % 2 == 0:
+			walls = _wall_run(false, LOCK_RUN_MAX)
+			if walls.is_empty() or walls.any(_is_wall):
+				continue
+			# In the middle of the run, so going round the end of the run takes longer.
+			lock = walls[randi_range(1, walls.size() - 2)] if walls.size() > 2 else walls.pick_random()
+		elif attempt / 2 < crossings.size():
+			lock = crossings[attempt / 2]
+			walls = _plug_run(lock)
+		else:
+			continue
+		for wall in walls:
+			board.walls[wall] = true
+		var shut := board.distances_from(mouse, false, Board.Belts.FROM, Board.Locks.OPEN)
+		board.walls.erase(lock)
+		var open := board.distances_from(mouse, false, Board.Belts.FROM, Board.Locks.OPEN)
+		for wall in walls:
+			board.walls.erase(wall)
+		if open.size() != cells:
+			continue
+		var score := 0
+		if job == LockJob.GOAL:
+			if shut.has(cheese):
+				continue
+			score = shut.size()
+		elif shut.size() == cells:
+			score = shut[cheese] - open[cheese] - LOCK_MIN_SAVING + 1
+		if score > best_score:
 			best = walls
 			best_lock = lock
-			best_gain = gain
-	for wall in best:
-		if wall != best_lock:
-			board.walls[wall] = true
-	return best_lock
+			best_score = score
+	if not best.is_empty():
+		best.erase(best_lock)
+		best.append(best_lock)
+	return best
+
+
+## A run of wall through the lock's edge, the lock and then on along its grid line both ways, to where
+## each end meets the board's edge or another wall, at most LOCK_RUN_MAX long: a lock that plugs a gap.
+func _plug_run(lock: Vector3i) -> Array[Vector3i]:
+	var walls: Array[Vector3i] = [lock]
+	# The cell corners at the ends of the run (see _wall_ends), and whether each goes on.
+	var ends: Array[Vector2i] = [Vector2i(lock.x, lock.y + 1) if lock.z == 1 else Vector2i(lock.x + 1, lock.y),
+		Vector2i(lock.x + 1, lock.y + 1)]
+	var along := ends[1] - ends[0]
+	var going: Array[bool] = []
+	for end in ends:
+		going.append(not _on_rim(end) and not _touches_wall(end))
+	while walls.size() < LOCK_RUN_MAX and (going[0] or going[1]):
+		for i in 2:
+			if not going[i] or walls.size() == LOCK_RUN_MAX:
+				continue
+			var offset := along if i == 1 else -along
+			var edge := _grid_line(ends[i], ends[i] + offset)
+			if edge == NO_EDGE or _is_wall(edge):
+				going[i] = false
+				continue
+			walls.append(edge)
+			ends[i] += offset
+			going[i] = not _on_rim(ends[i]) and not _touches_wall(ends[i])
+	return walls
 
 
 ## A straight lane for pushing a crate onto the plate cell: the plate, the cells the crate is pushed
@@ -2188,12 +2371,14 @@ static func _edge_cells(edge: Vector3i) -> Array[Vector2i]:
 
 
 ## Lays down Difficulty.pylons() shock pylons and Difficulty.flamers() flamethrowers (see Hazard), off
-## the mouse, the cheese, the traps, the chasms, the keys, plates, crates and crate lanes, and not
-## touching each other. Nothing can move onto one, so each goes only where it cuts no cell off from the
-## mouse. A flamethrower points a way its jet reaches at least FLAME_MIN cells. Each starts at a random
-## point in its countdown, but not about to go off on a mouse that starts in its blast.
+## the mouse, the cheese, the traps, the chasms, the keys, plates, crates and crate lanes, the cells
+## beside a lock, and not touching each other. Nothing can move onto one, so each goes only where it
+## cuts no cell off from the mouse, with the locks open or shut, so no key gets shut away. A
+## flamethrower points a way its jet reaches at least FLAME_MIN cells. Each starts at a random point in
+## its countdown, but not about to go off on a mouse that starts in its blast.
 func _place_hazards(mouse: Vector2i, cheese: Vector2i, traps: Array[Vector2i]) -> void:
 	var open_cells := board.grid * board.grid - traps.size() - board.chasms.size()
+	var shut := board.distances_from(mouse)
 	for kind: Hazard.Kind in [Hazard.Kind.PYLON, Hazard.Kind.FLAMER]:
 		var count := Difficulty.pylons(run.round_number) if kind == Hazard.Kind.PYLON \
 			else Difficulty.flamers(run.round_number)
@@ -2203,7 +2388,7 @@ func _place_hazards(mouse: Vector2i, cheese: Vector2i, traps: Array[Vector2i]) -
 				break
 			var cell := _random_cell()
 			if cell == mouse or cell == cheese or cell in traps or board.has_tile(cell) or board.has_item(cell) \
-					or cell in _crate_lanes or board.hazards.any(func(other: Hazard) -> bool: return _touching(cell, other.cell)):
+					or cell in _kept_clear or board.hazards.any(func(other: Hazard) -> bool: return _touching(cell, other.cell)):
 				continue
 			var hazard := Hazard.new(kind, cell, Card.Dir.UP, randi_range(Hazard.PERIOD_MIN, Hazard.PERIOD_MAX))
 			if kind == Hazard.Kind.FLAMER:
@@ -2216,26 +2401,30 @@ func _place_hazards(mouse: Vector2i, cheese: Vector2i, traps: Array[Vector2i]) -
 				if board.blast_cells(hazard).size() < FLAME_MIN:
 					continue
 			board.hazards.append(hazard)
-			if board.distances_from(mouse).size() != open_cells - board.hazards.size():
+			var now := board.distances_from(mouse)
+			if now.size() != shut.size() - int(shut.has(cell)) or board.distances_from(mouse, false,
+					Board.Belts.FROM, Board.Locks.OPEN).size() != open_cells - board.hazards.size():
 				board.hazards.pop_back()
 				continue
+			shut = now
 			hazard.timer = randi_range(2 if mouse in board.blast_cells(hazard) else 1, hazard.period)
 			placed += 1
 
 
 ## Lays down the round's glue pads, jump pads, mouse holes, conveyor belts and creaky floorboards, at
 ## most one on a cell and none on the mouse, the cheese, a trap, a chasm or bridge, a pylon or
-## flamethrower, a key, plate or crate, or a crate's lane. Linked holes are at least half the board apart. A jump pad throws the mouse its whole way,
-## with no wall in it, and not onto a trap. Belts are laid where they matter (see _place_belts), and
-## never carry the mouse off the board, into a wall or a chasm, or onto a trap. Floorboards only go where
-## breaking all of them would still leave every cell reachable, so they can't shut the mouse off from
-## the cheese.
+## flamethrower, a key, plate or crate, a crate's lane or beside a lock. Linked holes are at least half
+## the board apart, and out from behind the locks, so they never lead round one. A jump pad throws the
+## mouse its whole way, with no wall in it, and not onto a trap. Belts are laid where they matter (see
+## _place_belts), and never carry the mouse off the board, into a wall or a chasm, or onto a trap.
+## Floorboards only go where breaking all of them would still leave every cell reachable, with the
+## locks open or shut, so they can't shut the mouse off from the cheese or a key.
 func _place_floor(mouse: Vector2i, cheese: Vector2i, traps: Array[Vector2i]) -> void:
 	var number := run.round_number
 	var bounds := Rect2i(0, 0, board.grid, board.grid)
 	var free := func(cell: Vector2i) -> bool:
 		return bounds.has_point(cell) and cell != mouse and cell != cheese and cell not in traps \
-			and not board.has_tile(cell) and not board.has_item(cell) and cell not in _crate_lanes
+			and not board.has_tile(cell) and not board.has_item(cell) and cell not in _kept_clear
 	# On top of any thrown across a chasm (see _place_chasm_pads).
 	var pad_count := board.pads.size() + Difficulty.pads(number)
 	for attempt in 500:
@@ -2254,11 +2443,12 @@ func _place_floor(mouse: Vector2i, cheese: Vector2i, traps: Array[Vector2i]) -> 
 		if free.call(cell):
 			board.glue.append(cell)
 
+	var shut := board.distances_from(mouse)
 	for attempt in 500:
 		if board.holes.size() == Difficulty.holes(number) * 2:
 			break
 		var cell := _random_cell()
-		if free.call(cell) and (board.holes.size() % 2 == 0
+		if free.call(cell) and shut.has(cell) and (board.holes.size() % 2 == 0
 				or _distance(cell, board.holes[-1]) >= floori(board.grid / 2.0)):
 			board.holes.append(cell)
 	if board.holes.size() % 2 == 1:
@@ -2267,6 +2457,8 @@ func _place_floor(mouse: Vector2i, cheese: Vector2i, traps: Array[Vector2i]) -> 
 	_place_belts(mouse, cheese, traps, free)
 
 	var open_cells := board.grid * board.grid - traps.size() - board.chasms.size() - board.hazards.size()
+	shut = board.distances_from(mouse)
+	var shut_back := board.distances_from(mouse, false, Board.Belts.TO)
 	for attempt in 500:
 		if board.floorboards.size() == Difficulty.floorboards(number):
 			break
@@ -2275,11 +2467,15 @@ func _place_floor(mouse: Vector2i, cheese: Vector2i, traps: Array[Vector2i]) -> 
 			continue
 		# Check with every floorboard broken.
 		board.broken.assign(board.floorboards + [cell])
-		var reachable := board.distances_from(mouse).size()
+		var reachable := board.distances_from(mouse, false, Board.Belts.FROM, Board.Locks.OPEN).size()
 		# With the belts one-way, every cell must also get back to the mouse's start, and so to the
-		# cheese wherever it runs.
+		# cheese wherever it runs. With the locks shut, the gaps must cost no other cell either.
 		if reachable == open_cells - board.broken.size() \
-				and board.distances_from(mouse, false, Board.Belts.TO).size() == reachable:
+				and board.distances_from(mouse, false, Board.Belts.TO, Board.Locks.OPEN).size() == reachable \
+				and board.distances_from(mouse).size() \
+					== shut.size() - board.broken.filter(func(gap: Vector2i) -> bool: return shut.has(gap)).size() \
+				and board.distances_from(mouse, false, Board.Belts.TO).size() \
+					== shut_back.size() - board.broken.filter(func(gap: Vector2i) -> bool: return shut_back.has(gap)).size():
 			board.floorboards.append(cell)
 		board.broken.clear()
 
@@ -2290,16 +2486,20 @@ func _place_floor(mouse: Vector2i, cheese: Vector2i, traps: Array[Vector2i]) -> 
 ## BELT_SAVING). A belt that does neither is left out. Belts are one-way (Board.against_belt), so each
 ## must leave every cell reachable from the mouse's start and able to get back to it (and so to the
 ## cheese, wherever it runs), and the currents together add at most BELT_DETOUR of the board's side
-## to the way. free says which cells a belt can go on.
+## to the way. All this goes with the locks open, and a belt must also leave what's reachable with the
+## locks shut as it was, so no key gets shut away. free says which cells a belt can go on.
 func _place_belts(mouse: Vector2i, cheese: Vector2i, traps: Array[Vector2i], free: Callable) -> void:
 	var count := Difficulty.belts(run.round_number)
 	if count == 0:
 		return
-	var longest := _path_distance(mouse, cheese) + ceili(board.grid * BELT_DETOUR)
+	var open := Board.Locks.OPEN
+	var longest: int = board.distances_from(cheese, false, Board.Belts.TO, open)[mouse] \
+		+ ceili(board.grid * BELT_DETOUR)
+	var shut := _shut_reach(mouse)
 	for i in count:
 		var current := randf() < BELT_CURRENT_CHANCE
-		var from_mouse := board.distances_from(mouse)
-		var to_cheese := board.distances_from(cheese, false, Board.Belts.TO)
+		var from_mouse := board.distances_from(mouse, false, Board.Belts.FROM, open)
+		var to_cheese := board.distances_from(cheese, false, Board.Belts.TO, open)
 		var way: int = to_cheese[mouse]
 		var best: Dictionary[Vector2i, Card.Dir] = {}
 		var best_score := (BELT_CURRENT_DETOUR if current else BELT_SAVING) - 1
@@ -2322,12 +2522,13 @@ func _place_belts(mouse: Vector2i, cheese: Vector2i, traps: Array[Vector2i], fre
 				if score <= best_score:
 					continue
 			board.conveyors.merge(belt)
-			var after := board.distances_from(mouse)
-			var back := board.distances_from(mouse, false, Board.Belts.TO)
+			var after := board.distances_from(mouse, false, Board.Belts.FROM, open)
+			var back := board.distances_from(mouse, false, Board.Belts.TO, open)
+			var kept := after.size() == from_mouse.size() and back.size() == from_mouse.size() \
+				and after[cheese] <= longest and _shut_reach(mouse) == shut
 			for cell in belt:
 				board.conveyors.erase(cell)
-			if after.size() != from_mouse.size() or back.size() != from_mouse.size() \
-					or after[cheese] > longest:
+			if not kept:
 				continue
 			if current:
 				score = after[cheese] - way
@@ -2338,6 +2539,12 @@ func _place_belts(mouse: Vector2i, cheese: Vector2i, traps: Array[Vector2i], fre
 			board.conveyors.merge(best)
 			BugReport.note("  %s of %d cells, %d steps %s" % ["Current" if current else "Highway", best.size(),
 				best_score, "longer" if current else "saved"])
+
+
+## How many cells the mouse can reach from its start with the locks shut, and how many can get back to
+## it.
+func _shut_reach(mouse: Vector2i) -> Vector2i:
+	return Vector2i(board.distances_from(mouse).size(), board.distances_from(mouse, false, Board.Belts.TO).size())
 
 
 ## A random conveyor belt starting within BELT_REACH steps of one of the near cells: a walk of
@@ -2393,16 +2600,17 @@ func _belt_saving(belt: Dictionary[Vector2i, Card.Dir], from_mouse: Dictionary[V
 ## something in it.
 func _place_crumbs(mouse: Vector2i, cheese: Vector2i, traps: Array[Vector2i]) -> Array[Vector2i]:
 	var crumbs: Array[Vector2i] = []
-	for cell in _nooks(mouse, cheese).keys() + _pockets(board.distances_from(mouse), mouse, cheese).keys():
+	var from_mouse := board.distances_from(mouse, false, Board.Belts.FROM, Board.Locks.OPEN)
+	for cell in _nooks(mouse, cheese).keys() + _pockets(from_mouse, mouse, cheese).keys():
 		if crumbs.size() < CRUMB_COUNT and cell not in crumbs and not board.has_tile(cell) \
-				and not board.has_item(cell) and cell not in _crate_lanes:
+				and not board.has_item(cell) and cell not in _kept_clear:
 			crumbs.append(cell)
 	for attempt in 1000:
 		if crumbs.size() == CRUMB_COUNT:
 			break
 		var cell := _random_cell()
 		if cell not in [mouse, cheese] and cell not in traps and cell not in crumbs and not board.has_tile(cell) \
-				and not board.has_item(cell) and cell not in _crate_lanes:
+				and not board.has_item(cell) and cell not in _kept_clear:
 			crumbs.append(cell)
 	return crumbs
 
@@ -2418,7 +2626,7 @@ func _place_chest(mouse: Vector2i, cheese: Vector2i, traps: Array[Vector2i],
 		var cell := _random_cell()
 		if _distance(cell, mouse) >= spacing and cell != cheese and cell not in traps \
 				and cell not in crumbs and not board.has_tile(cell) and not board.has_item(cell) \
-				and cell not in _crate_lanes:
+				and cell not in _kept_clear:
 			chests.append(cell)
 			break
 	return chests
@@ -2463,9 +2671,23 @@ func _turn_limit(distance: int) -> int:
 
 
 ## Steps from one cell to another around the walls and traps (through the walls while squeezing) and
-## with the belts, or the straight distance when there's no way through.
+## with the belts, or the straight distance when there's no way through. When locked doors are in the
+## way, it's the way through them: straight there with a key in hand, else by the nearest key.
 func _path_distance(from: Vector2i, to: Vector2i) -> int:
-	return board.distances_from(to, board.squeeze, Board.Belts.TO).get(from, _distance(from, to))
+	var steps := board.distances_from(to, board.squeeze, Board.Belts.TO)
+	if steps.has(from) or board.doors.is_empty():
+		return steps.get(from, _distance(from, to))
+	steps = board.distances_from(to, false, Board.Belts.TO, Board.Locks.DOORS_OPEN)
+	if board.keys_held > 0 or not steps.has(from):
+		return steps.get(from, _distance(from, to))
+	var from_start := board.distances_from(from)
+	var shortest: int = steps[from]
+	var by_key := false
+	for key in board.keys:
+		if from_start.has(key) and steps.has(key) and (not by_key or from_start[key] + steps[key] < shortest):
+			shortest = from_start[key] + steps[key]
+			by_key = true
+	return shortest
 
 
 ## Each pylon's and flamethrower's cell and countdown, for the bug report.
