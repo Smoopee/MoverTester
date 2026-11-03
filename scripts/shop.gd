@@ -287,6 +287,7 @@ func _reroll(kind: Kind) -> void:
 		return
 	_run.crumbs -= price
 	_rerolls += 1
+	Sfx.play(Sfx.Sound.REROLL)
 	var shown: Array = _offers.filter(func(o: Offer) -> bool: return o.kind == kind) \
 			.map(func(o: Offer) -> Vector2i: return Vector2i(o.kind, o.id))
 	_fill_row(kind, _picks(kind, _unowned(kind)), _row_size(kind), shown)
@@ -418,6 +419,7 @@ func _buy(offer: Offer) -> void:
 func _sell(offer: Offer, detail: String) -> void:
 	_run.crumbs -= offer.price
 	offer.sold = true
+	Sfx.play(Sfx.Sound.BUY)
 	BugReport.note("Bought %s for %d%s (%d crumbs left)" % [_info(offer)[0], offer.price, detail, _run.crumbs])
 	refresh()
 

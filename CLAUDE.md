@@ -194,6 +194,18 @@ intensity grows with the score (a move's points on a log scale, a turn's against
 bigger, hotter in color, shaking, with sparks and a ring at the top. No popups when
 `Board.animate` is off. The dev menu's Items tab has Pop buttons to try the sizes.
 
+**Sound** is synthesized in code like the art (no audio files), on worker threads at startup, by
+`Synth` (`scripts/synth.gd`: tones, filtered noise, packed into `AudioStreamWAV`s). `Sfx`
+(`scripts/sfx.gd`) holds the sound effects: play one from anywhere with `Sfx.play(Sfx.Sound.X)`,
+which does nothing headless (the sim makes no `Sfx` or `Music`). A new sound gets a `Sound` and a
+recipe in `Sfx.build`. Board sounds go through `Board._sound`, which only plays while `animate` is on,
+so the preview stays quiet. Every button clicks unless it has the `Sfx.NO_CLICK` meta (cards never
+do). `Music` (`scripts/music.gd`) plays two songs written as note tables in `Music.SONGS` (BOARD, and
+BOSS in boss rounds), each three looping layers; the tension layer fades in with
+`Music.TENSION_TURNS` turns left, and the music is muffled behind the win panel and in the shop and
+stops when a run is lost. Volumes and mute (the speaker button by the trinkets, `SoundButton`, or M)
+are saved to `user://settings.cfg`. The dev menu's Sound tab plays every sound and song.
+
 **Skills** (`Items.Skill`, `Run.skills`) are always-on abilities for the rest of the run, held in
 `Items.SKILL_SLOTS` (4) slots shown above the card slots (`main.gd` `_refresh_skills`). WARP makes
 every step wrap round the board's edges like a WRAP slot (`Board.warp`); EFFICIENT gives +1 discard
@@ -271,6 +283,12 @@ pays `Boss.WIN_CRUMBS`, adds a card slot and a card in hand, and offers a free t
 - `scripts/shop.gd` — `Shop`: overlay after a won round. Rolls offers, rerolls the trinket and skill
   rows, sells them, and picks the card for a stamp or material.
 - `scripts/touch_tips.gd` — `TouchTips`: hold-to-show tooltips on a touchscreen (see Touch above).
+- `scripts/synth.gd` — `Synth`: builds sounds out of waves and noise (see Sound above).
+- `scripts/sfx.gd` — `Sfx`: the sound effects (`Sound`, `build`), button clicks, the Music and Sfx
+  buses and the saved volumes.
+- `scripts/music.gd` — `Music`: the songs (`SONGS`), rendered into layers, and `play` / `stop` /
+  `set_tension` / `set_muffled`.
+- `scripts/sound_button.gd` — `SoundButton`: the speaker button and its volume panel.
 - `scripts/pile_button.gd` — `PileButton`: the draw and discard piles either side of the hand, drawn
   as a card stack with a count (card back / skull). The discard pile also takes dropped cards.
 - `scripts/pile_viewer.gd` — `PileViewer`: overlay opened from the pile buttons that lists a
@@ -287,7 +305,8 @@ pays `Boss.WIN_CRUMBS`, adds a card slot and a card in hand, and offers a free t
 
 ## Conventions
 - Statically typed GDScript, tabs, `##` doc comments on classes and non-obvious members.
-- Everything is drawn in code (`_draw`, `StyleBoxFlat`): there are no art assets.
+- Everything is drawn in code (`_draw`, `StyleBoxFlat`) and synthesized in code (`Synth`): there are no
+  art or audio assets.
 - Nodes built in code (`Card`, `CardSlot`) rather than in scenes.
 - Movement methods are coroutines; callers `await` them. `Board.animate = false` makes them finish
   instantly (used by the simulation), and new movement code must honor it.

@@ -539,6 +539,8 @@ func move_cats() -> void:
 		longest = maxi(longest, route.size() - 1)
 	var tween := create_tween()
 	tween.tween_method(_walk_cats.bind(routes), 0.0, float(longest), CAT_STEP_TIME * maxi(longest, 1))
+	if longest > 0:
+		_sound(Sfx.Sound.MEOW)
 	if animate:
 		await tween.finished
 	else:
@@ -567,6 +569,9 @@ func fire_hazards() -> bool:
 	for hazard in _blasting:
 		if blasted_by == null and not invincible and mouse_cell in blast_cells(hazard):
 			blasted_by = hazard
+	for kind: Hazard.Kind in [Hazard.Kind.PYLON, Hazard.Kind.FLAMER]:
+		if _blasting.any(func(hazard: Hazard) -> bool: return hazard.kind == kind):
+			_sound(Sfx.Sound.ZAP if kind == Hazard.Kind.PYLON else Sfx.Sound.FLAME)
 	var tween := create_tween()
 	tween.tween_property(self, "_blast", 1.0, BLAST_TIME).from(0.0)
 	if animate:
@@ -631,6 +636,7 @@ func move_cheese(steps: int) -> void:
 		cheese_cell = best
 	if cheese_cell == start:
 		return
+	_sound(Sfx.Sound.SCAMPER)
 	var tween := create_tween().set_trans(Tween.TRANS_SINE)
 	tween.tween_property(self, "cheese_pos", Vector2(cheese_cell), CHEESE_STEP_TIME * _distance(start, cheese_cell))
 	if animate:
@@ -656,9 +662,11 @@ func step(dir: Card.Dir, wrap := false) -> bool:
 		_pushed = crate
 		_push_shift = -Vector2(offset)
 		BugReport.note("  Pushed the crate at %s to %s" % [target, crates[crate]])
+		_sound(Sfx.Sound.CRATE)
 	if _mouse_can_step(mouse_cell, target, true):
 		_unlock(mouse_cell, target)
 		mouse_cell = target
+		_sound(Sfx.Sound.STEP)
 		tween.tween_property(self, "mouse_pos", Vector2(target), STEP_TIME)
 		if _pushed != -1:
 			tween.parallel().tween_property(self, "_push_shift", Vector2.ZERO, STEP_TIME)
@@ -667,12 +675,14 @@ func step(dir: Card.Dir, wrap := false) -> bool:
 		target = wrapped
 		_trail_break()
 		mouse_cell = target
+		_sound(Sfx.Sound.STEP)
 		tween.tween_property(self, "mouse_pos", mouse_pos + Vector2(offset) * 0.5, STEP_TIME / 2)
 		tween.tween_callback(func() -> void: mouse_pos = Vector2(target) - Vector2(offset) * 0.5)
 		tween.tween_property(self, "mouse_pos", Vector2(target), STEP_TIME / 2)
 	else:
 		var bump := Vector2(mouse_cell) + Vector2(offset) * 0.25
 		tween.tween_property(self, "mouse_pos", bump, STEP_TIME / 2)
+		tween.tween_callback(_sound.bind(Sfx.Sound.BUMP))
 		tween.tween_property(self, "mouse_pos", Vector2(mouse_cell), STEP_TIME / 2)
 	return await _finish(tween, start, [], Motion.STEP)
 
@@ -692,6 +702,7 @@ func slide(dir: Card.Dir) -> bool:
 		_unlock(mouse_cell, mouse_cell + offset)
 		mouse_cell += offset
 		passed.append(mouse_cell)
+	_sound(Sfx.Sound.SLIDE)
 	var tween := create_tween().set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	tween.tween_property(self, "mouse_pos", Vector2(mouse_cell), SLIDE_CELL_TIME * passed.size() + STEP_TIME)
 	return await _finish(tween, start, passed, Motion.SLIDE)
@@ -703,14 +714,16 @@ func jump(offset: Vector2i, dir: Card.Dir, through_walls := false) -> bool:
 	facing = dir
 	var start := mouse_cell
 	mouse_cell = jump_landing(mouse_cell, offset, through_walls)
+	_sound(Sfx.Sound.JUMP)
 	return await _finish(_hop_tween(), start, [], Motion.JUMP)
 
 
-## Tweens the mouse to its cell in a hop.
+## Tweens the mouse to its cell in a hop, landing with a patter.
 func _hop_tween() -> Tween:
 	var tween := create_tween().set_parallel()
 	tween.tween_property(self, "mouse_pos", Vector2(mouse_cell), JUMP_TIME)
 	tween.tween_method(func(t: float) -> void: hop = sin(t * PI) * HOP_HEIGHT, 0.0, 1.0, JUMP_TIME)
+	tween.chain().tween_callback(_sound.bind(Sfx.Sound.STEP, 0.8))
 	return tween
 
 
@@ -786,6 +799,7 @@ func _finish(tween: Tween, start: Vector2i, passed: Array[Vector2i], motion: Mot
 			floorboards.erase(cell)
 			broken.append(cell)
 			BugReport.note("  Floorboard at %s broke" % cell)
+			_sound(Sfx.Sound.FLOORBOARD)
 	if await _arrive(passed):
 		return true
 	return await _ride()
@@ -828,8 +842,11 @@ func _arrive(cells: Array[Vector2i]) -> bool:
 				queue_redraw()
 				BugReport.note("  CRUMB MAGNET pulled in the crumb at %s" % cell)
 				crumb_collected.emit(cell)
+	if mouse_cell in traps:
+		_sound(Sfx.Sound.TRAP)
 	var cat := _cat_at(mouse_cell)
 	if cat and not invincible:
+		_sound(Sfx.Sound.POUNCE)
 		await _pounce(cat)
 	return mouse_cell == cheese_cell or is_caught()
 
@@ -851,12 +868,14 @@ func _ride() -> bool:
 			_trail_break()
 			mouse_cell = exit
 			popped_out = true
+			_sound(Sfx.Sound.HOLE)
 			tween = create_tween()
 			tween.tween_interval(HOLE_TIME)
 			tween.tween_callback(func() -> void: mouse_pos = Vector2(exit))
 		elif conveyors.has(mouse_cell) and _mouse_can_step(mouse_cell, mouse_cell + Card.OFFSETS[conveyors[mouse_cell]]):
 			mouse_cell += Card.OFFSETS[conveyors[mouse_cell]]
 			popped_out = false
+			_sound(Sfx.Sound.BELT)
 			tween = create_tween()
 			tween.tween_property(self, "mouse_pos", Vector2(mouse_cell), CONVEYOR_TIME)
 		elif pads.has(mouse_cell) and jump_landing(mouse_cell, pads[mouse_cell]) != mouse_cell:
@@ -865,6 +884,7 @@ func _ride() -> bool:
 			mouse_cell = jump_landing(pad, pads[pad])
 			BugReport.note("  Jump pad at %s threw the mouse to %s" % [pad, mouse_cell])
 			popped_out = false
+			_sound(Sfx.Sound.PAD)
 			tween = _hop_tween()
 		else:
 			break
@@ -877,7 +897,14 @@ func _ride() -> bool:
 	stuck = mouse_cell in glue
 	if stuck:
 		BugReport.note("  Stuck in glue at %s" % mouse_cell)
+		_sound(Sfx.Sound.GLUE)
 	return false
+
+
+## Plays a sound while animating, so the preview's board and the sim stay quiet.
+func _sound(sound: Sfx.Sound, pitch := 1.0) -> void:
+	if animate:
+		Sfx.play(sound, pitch)
 
 
 func _trail_break() -> void:

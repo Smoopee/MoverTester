@@ -118,6 +118,10 @@ const PIGGY_BANK_MAX := 5
 const SALT_SHAKER_CRUMBS := 2
 const HINT := "Click a card to put it in the next slot, or drag it to a slot. Then Lock In."
 ## Color of the discard area under the hand, which lights up while a card is dragged.
+## Seconds after a lost round ends before its sad tune plays.
+const LOSE_SOUND_DELAY := 0.35
+## A card going back to the hand sounds lower than one going into a slot.
+const HAND_PITCH := 0.85
 const DISCARD_COLOR := Color("e07a5f")
 const PLAYING := Color(1.15, 1.15, 0.8)
 const PLAYED := Color(1, 1, 1, 0.45)
@@ -230,6 +234,10 @@ static func _make_theme() -> Theme:
 
 func _ready() -> void:
 	get_tree().root.theme = _make_theme()
+	# The balance sim runs headless, with no one to hear it, so it makes no sounds.
+	if DisplayServer.get_name() != "headless":
+		add_child(Sfx.new())
+		add_child(Music.new())
 	hand_box.set_drag_forwarding(Callable(), _can_drop_on_hand, _drop_on_hand)
 	hand_box.child_entered_tree.connect(func(node: Node) -> void: _fit_card(node, hand_card_size))
 	discard_card_button.set_drag_forwarding(Callable(), _can_drop_on_discard, _drop_on_discard)
@@ -239,6 +247,7 @@ func _ready() -> void:
 			"hold" if DisplayServer.is_touchscreen_available() else "right-click"])
 	_light_discard_area(false)
 	lock_in_button.pressed.connect(lock_in)
+	lock_in_button.set_meta(Sfx.NO_CLICK, true)
 	_preview_board.animate = false
 	_preview_board.hide()
 	add_child(_preview_board)
@@ -280,6 +289,7 @@ func _ready() -> void:
 	var bug_report := BugReport.new()
 	bug_report.get_state = _bug_report_state
 	add_child(bug_report)
+	trinket_row.get_parent().add_child(SoundButton.new())
 	# Phones have no F2 or F12 key, so on a touchscreen buttons after the trinkets open them.
 	var touch := DisplayServer.is_touchscreen_available()
 	if touch:
@@ -386,6 +396,8 @@ func new_round() -> void:
 	shop.hide()
 	_refresh_trinkets()
 	_refresh_skills()
+	Music.play(Music.Song.BOSS if run.boss != -1 else Music.Song.BOARD)
+	Music.set_muffled(false)
 	start_turn()
 
 
@@ -410,6 +422,10 @@ func start_turn() -> void:
 	if chest_note:
 		status_label.text = chest_note if status_label.text == HINT else "%s %s" % [chest_note, status_label.text]
 	chest_note = ""
+	Sfx.play(Sfx.Sound.DEAL)
+	if turn == turn_limit and turn > 1:
+		Sfx.play(Sfx.Sound.LAST_TURN)
+	Music.set_tension(turn_limit - turn < Music.TENSION_TURNS)
 	_refresh_hud()
 	_refresh_pouch()
 	refresh_preview()
@@ -421,6 +437,7 @@ func lock_in() -> void:
 	if busy or win_panel.visible or shop.visible:
 		return
 	busy = true
+	Sfx.play(Sfx.Sound.LOCK_IN)
 	lock_in_button.disabled = true
 	draw_pile_button.disabled = true
 	discard_button.disabled = true
@@ -654,7 +671,12 @@ func _end_round() -> void:
 		win_details.text = "Run over on round %d, after %d cheese%s found." % [
 			run.round_number, won, "" if won == 1 else "s"]
 		win_panel_button.text = "New Run"
+		Music.stop()
+		# After the snap, pounce or blast that ended it has rung out a little.
+		get_tree().create_timer(LOSE_SOUND_DELAY).timeout.connect(Sfx.play.bind(Sfx.Sound.LOSE))
 	else:
+		Sfx.play(Sfx.Sound.BOSS_WIN if run.boss != -1 or won_run() else Sfx.Sound.WIN)
+		Music.set_muffled(true)
 		var reward := WIN_CRUMBS if run.boss == -1 else Boss.WIN_CRUMBS
 		var lines := PackedStringArray(["%s  +%d" % ["Cheese" if run.boss == -1 else "Boss cheese", reward]])
 		var earned := reward + discards_left
@@ -777,6 +799,7 @@ func _play_material(card: Card) -> void:
 			run.crumbs += Items.GOLD_CRUMBS
 			gold_crumbs += Items.GOLD_CRUMBS
 			if board.animate:
+				Sfx.play(Sfx.Sound.CRUMB, 1.25)
 				ScorePopup.spawn(self, board.cell_global_center(board.mouse_cell) + Vector2(0, 18),
 					"+%d crumb" % Items.GOLD_CRUMBS, 0.3)
 		_:
@@ -850,15 +873,20 @@ func _add_points(points: int, cell: Vector2i) -> void:
 
 
 func _pop_points() -> void:
+	var strongest := 0.0
 	for cell: Vector2i in _pending_points:
 		var points := _pending_points[cell]
-		ScorePopup.spawn(self, board.cell_global_center(cell), "+%d" % points, ScorePopup.points_intensity(points))
+		var intensity := ScorePopup.points_intensity(points)
+		strongest = maxf(strongest, intensity)
+		ScorePopup.spawn(self, board.cell_global_center(cell), "+%d" % points, intensity)
 	_pending_points.clear()
+	Sfx.play(Sfx.Sound.POINTS, 1.0 + strongest * 0.6)
 
 
 ## Pops up mult a trinket or skill added this turn, over the mouse.
 func _pop_mult(text: String) -> void:
 	if board.animate:
+		Sfx.play(Sfx.Sound.MULT)
 		ScorePopup.spawn(self, board.cell_global_center(board.mouse_cell) + Vector2(0, -18), text, 0.45,
 			false, true)
 
@@ -869,6 +897,7 @@ func pop_turn_score(gained: int, points: int, mult: int) -> void:
 	if not board.animate:
 		return
 	var strength := ScorePopup.turn_intensity(gained, score_target)
+	Sfx.play(Sfx.Sound.SCORE, 0.8 + 0.5 * strength)
 	ScorePopup.spawn(self, board.get_global_rect().get_center(), "+%d" % gained, strength, true, false,
 		"%d × %d" % [points, mult] if mult > 1 else "")
 	var flash := create_tween()
@@ -933,6 +962,7 @@ func _play(slot: CardSlot, card: Card, first: bool) -> bool:
 					BugReport.note("  Slot %d SNIFF %s fizzled" % [slot.number, Card.NAMES[dir]])
 					status_label.text = "Sniff: %s isn't toward the cheese, so the mouse stays put." % Card.NAMES[dir]
 					if board.animate:
+						Sfx.play(Sfx.Sound.FIZZLE)
 						# Not process_always, so it waits while the F12 bug report has the game paused.
 						await get_tree().create_timer(Board.STEP_TIME * 2, false).timeout
 					return false
@@ -1026,6 +1056,7 @@ func _hand_size() -> int:
 
 ## Pays CHEST_CRUMBS.
 func _open_chest(cell: Vector2i) -> void:
+	Sfx.play(Sfx.Sound.CHEST)
 	run.crumbs += CHEST_CRUMBS
 	_add_points(Score.CHEST_POINTS, cell)
 	var text := "+%d" % CHEST_CRUMBS
@@ -1156,6 +1187,7 @@ func use_consumable(index: int) -> void:
 			board.squeeze = true
 			status_label.text = "Squeeze: walls won't stop the mouse this turn."
 	run.pouch.remove_at(index)
+	Sfx.play(Sfx.Sound.USE)
 	BugReport.note("Used %s" % item_name)
 	_refresh_hud()
 	_refresh_pouch()
@@ -1194,6 +1226,7 @@ func discard_card(card: Card) -> void:
 		status_label.text = "No cards left to draw."
 		return
 	discards_left -= 1
+	Sfx.play(Sfx.Sound.DISCARD)
 	run.deck.discard([card.data])
 	var new_card := _make_card(drawn[0])
 	hand_box.add_child(new_card)
@@ -1227,9 +1260,13 @@ func _on_card_clicked(card: Card) -> void:
 		var slot := _first_empty_slot()
 		if slot:
 			card.reparent(slot, false)
+			Sfx.play(Sfx.Sound.CARD_PLACE)
 			BugReport.note("%s -> slot %d" % [card.data.label(), slot.number])
+		else:
+			Sfx.play(Sfx.Sound.DENIED)
 	else:
 		card.reparent(hand_box, false)
+		Sfx.play(Sfx.Sound.CARD_PLACE, HAND_PITCH)
 		BugReport.note("%s -> hand" % card.data.label())
 	refresh_preview()
 
@@ -1254,6 +1291,7 @@ func _place_in_slot(card: Card, slot: CardSlot) -> void:
 	if existing:
 		existing.reparent(card.get_parent(), false)
 	card.reparent(slot, false)
+	Sfx.play(Sfx.Sound.CARD_PLACE)
 	BugReport.note("%s -> slot %d%s" % [card.data.label(), slot.number,
 		" (swapped out %s)" % existing.data.label() if existing else ""])
 	refresh_preview()
@@ -1297,23 +1335,27 @@ func _light_discard_area(lit: bool) -> void:
 
 func _drop_on_hand(_at_position: Vector2, data: Variant) -> void:
 	data.reparent(hand_box, false)
+	Sfx.play(Sfx.Sound.CARD_PLACE, HAND_PITCH)
 	BugReport.note("%s -> hand" % data.data.label())
 	refresh_preview()
 
 
 func _on_key_collected(cell: Vector2i) -> void:
+	Sfx.play(Sfx.Sound.KEY)
 	BugReport.note("  Picked up a key at %s (%d held)" % [cell, board.keys_held])
 	status_label.text = "A key! Walk into a locked door to open it."
 	_refresh_hud()
 
 
 func _on_door_unlocked(_edge: Vector3i) -> void:
+	Sfx.play(Sfx.Sound.UNLOCK)
 	status_label.text = "The key opened the door."
 	_refresh_hud()
 
 
 func _on_crumb_collected(cell: Vector2i) -> void:
 	var worth := 1 + (SALT_SHAKER_CRUMBS if run.has(Items.Trinket.SALT_SHAKER) else 0)
+	Sfx.play(Sfx.Sound.CRUMB)
 	run.crumbs += worth
 	round_crumbs += worth
 	_add_points(Score.CRUMB_POINTS, cell)
@@ -1422,6 +1464,7 @@ func _refresh_skills() -> void:
 func _flash_skill(skill: Items.Skill) -> void:
 	var i := run.skills.find(skill)
 	if i != -1 and i < skill_row.get_child_count():
+		Sfx.play(Sfx.Sound.SKILL)
 		(skill_row.get_child(i) as SkillSlot).flash()
 
 
@@ -1442,6 +1485,7 @@ func _refresh_pouch() -> void:
 		button.add_theme_font_size_override("font_size", 12)
 		button.add_theme_color_override("font_color", Items.CONSUMABLE_COLOR)
 		button.pressed.connect(use_consumable.bind(i))
+		button.set_meta(Sfx.NO_CLICK, true)
 		pouch_row.add_child(button)
 
 
