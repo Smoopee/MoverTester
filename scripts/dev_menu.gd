@@ -137,6 +137,7 @@ func _ready() -> void:
 	_build_items_tab(_add_tab("Items"))
 	_build_cards_tab(_add_tab("Cards"))
 	_build_board_tab(_add_tab("Board"))
+	_build_sound_tab(_add_tab("Sound"))
 
 	_feedback.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_feedback.custom_minimum_size = Vector2(0, 36)
@@ -539,6 +540,38 @@ func _build_board_tab(box: VBoxContainer) -> void:
 
 
 ## Edits the board with the brush.
+func _build_sound_tab(box: VBoxContainer) -> void:
+	_heading(box, "Music")
+	var row := _row(box)
+	for song: Music.Song in Music.Song.values():
+		var song_name: String = Music.Song.keys()[song].capitalize()
+		_button(row, song_name, func() -> void:
+			Music.play(song)
+			_did("Playing the %s song" % song_name))
+	_button(row, "Stop", func() -> void:
+		Music.stop()
+		_did("Stopped the music"))
+	row = _row(box)
+	for on: bool in [true, false]:
+		_button(row, "Tension %s" % ("on" if on else "off"), func() -> void:
+			Music.set_tension(on)
+			_did("Music tension %s" % ("on" if on else "off")))
+	for on: bool in [true, false]:
+		_button(row, "Muffle" if on else "Unmuffle", func() -> void:
+			Music.set_muffled(on)
+			_did("Music %s" % ("muffled" if on else "unmuffled")))
+
+	_heading(box, "Sound effects")
+	row = _row(box)
+	for sound: Sfx.Sound in Sfx.Sound.values():
+		var sound_name: String = Sfx.Sound.keys()[sound]
+		var button := _button(row, sound_name.capitalize(), func() -> void:
+			Sfx.play(sound)
+			_say("Played %s." % sound_name))
+		# It plays its own sound.
+		button.set_meta(Sfx.NO_CLICK, true)
+
+
 func _on_cell_clicked(cell: Vector2i, side: Card.Dir) -> void:
 	if not _panel.visible or _brush == Brush.OFF or not _idle():
 		return

@@ -238,6 +238,7 @@ func _gui_input(event: InputEvent) -> void:
 			data.swivel()
 			_restyle()
 		BugReport.note("Set %s -> %s" % [old, data.label()])
+		Sfx.play(Sfx.Sound.CLICK)
 		queue_redraw()
 		stamp_set.emit()
 	elif button and button.button_index == MOUSE_BUTTON_LEFT and DisplayServer.is_touchscreen_available():
@@ -273,6 +274,7 @@ func _get_drag_data(_at_position: Vector2) -> Variant:
 	if disabled:
 		return null
 	_set_held(-1.0)
+	Sfx.play(Sfx.Sound.CARD_PICK)
 	var preview := Card.new()
 	preview.data = data
 	preview.card_size = card_size
