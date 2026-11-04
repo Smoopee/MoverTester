@@ -372,6 +372,9 @@ func _build_items_tab(box: VBoxContainer) -> void:
 		check.toggled.connect(_set_skill.bind(skill))
 		box.add_child(check)
 		_skill_boxes[skill] = check
+	_button(_row(box), "Refill skill charges", func() -> void:
+		game.refill_skill_charges()
+		_did("Refilled the skill charges"))
 
 	_heading(box, "Consumables")
 	row = _row(box)

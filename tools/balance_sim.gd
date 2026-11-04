@@ -9,7 +9,8 @@ extends SceneTree
 ## (alley_king, runaway_cheese, kitchen_light): then every round is that boss, each on a fresh run.
 ## --slots N and --hand N start every run with that many card slots and cards in hand (boss wins add more, but bosses are off by default).
 ## --trinkets a,b starts every run with those trinkets (butter_pat, ride_ticket, ...), and --skills a,b
-## with those skills (show_off, daredevil, ...), to see what they do to the score. --materials a,b makes
+## with those skills (hard_head, daredevil, ...), which the bot uses as soon as it can each round, to see
+## what they do to the score. --materials a,b makes
 ## the starting deck's cards those materials (wood, shiny, gold, copper, paper, stone), taking turns.
 ## --keep-hand on keeps the cards not played in the hand for the next turn instead of discarding them (main.gd keep_hand).
 
@@ -180,6 +181,10 @@ func _play_round() -> void:
 		if main.turn > MAX_TURNS:
 			unfinished += 1
 			return
+		# Skills only work on the turns they're used: the bot spends every charge as soon as it can.
+		for skill: Items.Skill in main.run.skills:
+			if main.skill_charges.get(skill, 0) > 0:
+				main.use_skill(skill)
 		var used := _place_cards()
 		var before := _distance()
 		var for_key := _key_target()

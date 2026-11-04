@@ -479,7 +479,7 @@ func refresh() -> void:
 	var pouch_full := _run.pouch.size() >= Items.POUCH_SIZE
 	var skills_full := _run.skills.size() >= Items.SKILL_SLOTS
 	_pouch_label.text = "Used once, then gone. Pouch %d/%d." % [_run.pouch.size(), Items.POUCH_SIZE]
-	_skills_label.text = "Always on, for the rest of the run. Skills %d/%d." % [_run.skills.size(),
+	_skills_label.text = "Used from their slot, with charges that refill each round. Skills %d/%d." % [_run.skills.size(),
 			Items.SKILL_SLOTS]
 	for offer in _offers:
 		var blocked := offer.kind == Kind.CONSUMABLE and pouch_full or offer.kind == Kind.SKILL and skills_full
