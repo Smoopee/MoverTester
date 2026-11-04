@@ -1,7 +1,7 @@
 class_name Items
 extends RefCounted
-## What the shop sells: trinkets (passive for the rest of the run), skills (always on, held in the
-## SKILL_SLOTS slots above the card slots), consumables (held in the pouch, used once), card stamps
+## What the shop sells: trinkets (passive for the rest of the run), skills (held in the SKILL_SLOTS
+## slots above the card slots, each with charges a round that turn it on for a turn), consumables (held in the pouch, used once), card stamps
 ## (which change how a card moves) and card materials (which change what it pays when it plays).
 
 ## A trinket is an object the mouse carries and does what that object would; a skill is a trait of
@@ -16,9 +16,9 @@ enum Trinket {
 enum CardMaterial { NONE, WOOD, SHINY, GOLD, COPPER, PAPER, STONE }
 enum Consumable { FRESH_BREEZE, CALM, NEW_PAWS, CHEESE_BAIT, SQUEEZE }
 enum Skill {
-	WARP, EFFICIENT, THICK_FUR,
+	WARP, THICK_FUR,
 	# Score skills (see Score).
-	HARD_HEAD, SHOW_OFF, DAREDEVIL,
+	HARD_HEAD, DAREDEVIL,
 }
 
 const TRINKET_COLOR := Color("f5c542")
@@ -44,17 +44,22 @@ const CONSUMABLES := {
 	Consumable.CHEESE_BAIT: ["CHEESE BAIT", "Remove the trap nearest the mouse.", 4],
 	Consumable.SQUEEZE: ["SQUEEZE", "This turn the mouse squeezes through walls.", 3],
 }
-## Name, description and price of each skill.
+## Name, description and price of each skill. A skill does nothing until it's used: click its slot
+## before Lock In to spend a charge (SKILL_CHARGES) and turn it on for that turn.
 const SKILLS := {
-	Skill.WARP: ["WARP", "Every step off an edge brings the mouse in on the opposite side, as in a WRAP slot.", 10],
-	Skill.EFFICIENT: ["EFFICIENT", "Each crumb picked up on the board gives +1 discard this round.", 7],
-	Skill.THICK_FUR: ["THICK FUR", "The first trap each round breaks instead of catching the mouse.", 12],
+	Skill.WARP: ["WARP", "This turn, every step off an edge brings the mouse in on the opposite side, as in a WRAP slot.", 10],
+	Skill.THICK_FUR: ["THICK FUR", "This turn, the first trap the mouse lands on breaks instead of catching it.", 12],
 	Skill.HARD_HEAD: ["HARD HEAD",
-		"Score: +%d mult each time the mouse bumps into a wall, the edge or anything else in its way." % Score.HARD_HEAD_MULT, 7],
-	Skill.SHOW_OFF: ["SHOW-OFF",
-		"Score: +%d mult for each slot effect and stamp the cards play." % Score.SHOW_OFF_MULT, 7],
+		"Score: this turn, +%d mult each time the mouse bumps into a wall, the edge or anything else in its way." % Score.HARD_HEAD_MULT, 7],
 	Skill.DAREDEVIL: ["DAREDEVIL",
-		"Score: x%d mult when the cards leave the mouse next to a trap, a cat or a cat's path." % Score.DAREDEVIL_TIMES, 8],
+		"Score: x%d mult this turn if the cards leave the mouse next to a trap, a cat or a cat's path." % Score.DAREDEVIL_TIMES, 8],
+}
+## Times each skill can be used a round. Charges refill at the start of every round.
+const SKILL_CHARGES := {
+	Skill.WARP: 1,
+	Skill.THICK_FUR: 1,
+	Skill.HARD_HEAD: 1,
+	Skill.DAREDEVIL: 1,
 }
 ## Skills the player can hold at once.
 const SKILL_SLOTS := 4

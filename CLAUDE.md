@@ -190,7 +190,7 @@ and `_bank_turn` adds the turn to the score, with `Score.SPARE_TURN_MULT` per tu
 turn that reaches the cheese. Only the real board is connected, so the preview scores nothing. The
 round's target (`Score.target`) grows each round, and more in a boss round. Meeting it pays bonus
 crumbs (`Score.crumbs`), and missing it in a boss round ends the run (`_short_of_boss_target`). The
-score trinkets are BUTTER PAT and RIDE TICKET; the score skills are HARD HEAD, SHOW-OFF and DAREDEVIL.
+score trinkets are BUTTER PAT and RIDE TICKET; the score skills are HARD HEAD and DAREDEVIL.
 
 Score shows as **popups** (`scripts/score_popup.gd` `ScorePopup`): points pop up on the cell that
 made them (`main.gd` `_add_points`, which every point source goes through), mult from trinkets and skills over
@@ -211,18 +211,23 @@ BOSS in boss rounds), each three looping layers; the tension layer fades in with
 stops when a run is lost. Volumes and mute (the speaker button by the trinkets, `SoundButton`, or M)
 are saved to `user://settings.cfg`. The dev menu's Sound tab plays every sound and song.
 
-**Skills** (`Items.Skill`, `Run.skills`) are always-on abilities for the rest of the run, held in
-`Items.SKILL_SLOTS` (4) slots shown above the card slots (`main.gd` `_refresh_skills`). WARP makes
-every step wrap round the board's edges like a WRAP slot (`Board.warp`); EFFICIENT gives +1 discard
-for each crumb picked up (`_on_crumb_collected`); THICK FUR breaks the first trap each round
-(`_survive_trap`). A skill's slot lights up (`_flash_skill`) whenever it does something.
+**Skills** (`Items.Skill`, `Run.skills`) are actives, kept for the rest of the run in
+`Items.SKILL_SLOTS` (4) slots shown above the card slots (`main.gd` `_refresh_skills`, `SkillSlot`).
+Each has `Items.SKILL_CHARGES` charges a round (1 each for now; `main.gd` `skill_charges`, refilled in
+`new_round`). Clicking a skill's slot before Lock In spends a charge and turns the skill on for that
+turn (`use_skill`, `active_skills`), shown by a bright rim and the charge pips; `_end_skills` turns
+them off once the turn's cards have played. WARP makes every step wrap round the board's edges like
+a WRAP slot (`Board.warp`); THICK FUR breaks the first trap the mouse lands on (`_survive_trap`);
+HARD HEAD adds mult for each bump and DAREDEVIL multiplies it when the turn ends next to danger. A
+skill's slot lights up (`_flash_skill`) whenever it does something. The dev menu's Items tab can
+refill the charges.
 
 **Trinkets are objects, skills are traits.** Any new or renamed item follows these rules:
 - A **trinket** is a physical thing the mouse carries, named as one (PIGGY BANK, CRUMB MAGNET), and
   its effect is what that object would plausibly do: a piggy bank saves crumbs, a magnet pulls them in.
   Never a body part, an ability or an adjective.
 - A **skill** is a trait or ability of the mouse itself, named as something the mouse is or can do
-  (WARP, EFFICIENT), and its effect is that trait at work. Never an object.
+  (WARP, THICK FUR), and its effect is that trait at work. Never an object.
 - If an idea reads as something the mouse *has in its pouch*, it's a trinket; if it reads as
   something the mouse *is or does*, it's a skill. Pick the name and the category together.
 
@@ -333,7 +338,8 @@ The sim lets runs go on, so it prints win/loss rates per round number (the diffi
 `--slots N` / `--hand N` to start every run with that many slots / cards in hand. The round table
 also shows the bot's mean score in won rounds against the target. The bot plays for the cheese, not the
 score, so its score is a floor. `--trinkets butter_pat,ride_ticket` starts every run with those
-trinkets, `--skills show_off,daredevil` with those skills, and `--materials wood,gold` makes the
+trinkets, `--skills hard_head,daredevil` with those skills (the bot uses each charge as soon as it
+can), and `--materials wood,gold` makes the
 starting deck's cards those materials, taking turns. The bot plays few cards a turn, so a STONE deck
 scores far more for it than for a player who fills the slots.
 

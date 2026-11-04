@@ -25,9 +25,8 @@ const MAX_TARGET_CRUMBS := 9
 ## Score trinkets (Items.Trinket).
 const BUTTER_PAT_POINTS := 2
 const RIDE_TICKET_MULT := 2
-## Score skills (Items.Skill).
+## Score skills (Items.Skill), on the turns they're used.
 const HARD_HEAD_MULT := 1
-const SHOW_OFF_MULT := 1
 const DAREDEVIL_TIMES := 2
 ## Card materials (Items.CardMaterial): points a WOOD card and mult a SHINY card add each time it plays.
 const WOOD_POINTS := 2

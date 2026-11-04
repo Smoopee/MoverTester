@@ -184,8 +184,13 @@ var _pending_points: Dictionary[Vector2i, int] = {}
 var chest_rewards := PackedStringArray()
 ## Shown in place of the hint at the start of the next turn, after a chest is opened.
 var chest_note := ""
-## Whether THICK FUR has already broken a trap this round.
+## Whether THICK FUR has already broken a trap this turn.
 var trap_survived := false
+## Charges each of the run's skills has left this round (Items.Skill -> count), refilled from
+## Items.SKILL_CHARGES at the start of every round.
+var skill_charges: Dictionary[int, int] = {}
+## Skills used this turn, on until the turn's cards have played (use_skill).
+var active_skills: Array[int] = []
 ## Cards played from RECYCLE slots, returned to the next hand.
 var recycled: Array[CardData] = []
 ## Set from the F2 dev menu: the cards left in the hand at Lock In stay in it for the next turn,
@@ -396,7 +401,8 @@ func new_round() -> void:
 	last_turn_score = ""
 	chest_rewards.clear()
 	chest_note = ""
-	trap_survived = false
+	_end_skills()
+	skill_charges.clear()
 	win_panel.hide()
 	pile_viewer.hide()
 	shop.hide()
@@ -466,7 +472,7 @@ func lock_in() -> void:
 	turn_mult = 1
 	var order := _play_order()
 	var reached := await _play_cards(order)
-	_score_cards(order.slice(0, reached))
+	_score_cards()
 	_pay_stones()
 	# Set when the mouse reaches the cheese or is caught in a trap.
 	var ended := _round_over()
@@ -481,6 +487,7 @@ func lock_in() -> void:
 	if board.squeeze:
 		board.squeeze = false
 		BugReport.note("Squeeze wore off")
+	_end_skills()
 
 	# Before the cats walk: the cheese stays off their paths, so no cat ends up on it.
 	if not ended and run.boss == Boss.Kind.RUNAWAY_CHEESE:
@@ -786,7 +793,7 @@ func _on_mouse_moved(motion: Board.Motion, cells: int) -> void:
 				turn_mult += Score.RIDE_TICKET_MULT
 				_pop_mult("+%d mult" % Score.RIDE_TICKET_MULT)
 		Board.Motion.BUMP:
-			if run.has_skill(Items.Skill.HARD_HEAD):
+			if Items.Skill.HARD_HEAD in active_skills:
 				turn_mult += Score.HARD_HEAD_MULT
 				_pop_mult("+%d mult" % Score.HARD_HEAD_MULT)
 				_flash_skill(Items.Skill.HARD_HEAD)
@@ -834,21 +841,10 @@ func _pay_stones() -> void:
 	_refresh_hud()
 
 
-## Adds the mult that goes by how the cards played, the slots in played: SHOW-OFF for each slot effect
-## and stamp, and DAREDEVIL when they left the mouse next to a trap, a cat or a cat's path.
-func _score_cards(played: Array[CardSlot]) -> void:
-	if run.has_skill(Items.Skill.SHOW_OFF):
-		var effects := 0
-		for slot in played:
-			var card := slot.get_card()
-			if card:
-				effects += int(_slot_effect(slot, card) != CardSlot.Effect.NONE) \
-					+ int(card.stamp != CardSlot.Effect.NONE)
-		turn_mult += effects * Score.SHOW_OFF_MULT
-		if effects > 0:
-			_pop_mult("+%d mult" % (effects * Score.SHOW_OFF_MULT))
-			_flash_skill(Items.Skill.SHOW_OFF)
-	if run.has_skill(Items.Skill.DAREDEVIL) and not _round_over():
+## Adds the mult that goes by how the cards played: DAREDEVIL, when it's on this turn and the cards
+## left the mouse next to a trap, a cat or a cat's path.
+func _score_cards() -> void:
+	if Items.Skill.DAREDEVIL in active_skills and not _round_over():
 		for offset: Vector2i in Card.OFFSETS.values():
 			if board.is_deadly(board.mouse_cell + offset):
 				turn_mult *= Score.DAREDEVIL_TIMES
@@ -919,15 +915,15 @@ func pop_turn_score(gained: int, points: int, mult: int) -> void:
 		.from(Color.WHITE.lerp(Color(2.2, 2.2, 1.6), 0.4 + 0.6 * strength))
 
 
-## If the mouse is on a trap and THICK FUR hasn't been used this round, breaks the trap and returns
-## true so the turn carries on.
+## If the mouse is on a trap, THICK FUR is on this turn and hasn't broken a trap yet, breaks the trap
+## and returns true so the turn carries on.
 func _survive_trap() -> bool:
-	if not board.is_trapped() or trap_survived or not run.has_skill(Items.Skill.THICK_FUR):
+	if not board.is_trapped() or trap_survived or Items.Skill.THICK_FUR not in active_skills:
 		return false
 	trap_survived = true
 	board.remove_trap(board.mouse_cell)
 	BugReport.note("  THICK FUR broke the trap at %s" % board.mouse_cell)
-	status_label.text = "Thick Fur! The trap broke. It won't save you again this round."
+	status_label.text = "Thick Fur! The trap broke."
 	# The preview's board doesn't animate, and the preview shouldn't light up the skill.
 	if board.animate:
 		_flash_skill(Items.Skill.THICK_FUR)
@@ -1374,10 +1370,6 @@ func _on_crumb_collected(cell: Vector2i) -> void:
 	round_crumbs += worth
 	_add_points(Score.CRUMB_POINTS, cell)
 	BugReport.note("  Picked up a crumb at %s (+%d)" % [cell, worth])
-	if run.has_skill(Items.Skill.EFFICIENT):
-		discards_left += 1
-		BugReport.note("  EFFICIENT: +1 discard (%d left)" % discards_left)
-		_flash_skill(Items.Skill.EFFICIENT)
 	_refresh_hud()
 
 
@@ -1462,16 +1454,70 @@ func _refresh_trinkets() -> void:
 
 
 ## Fills the Items.SKILL_SLOTS skill slots above the card slots with the run's skills, the rest empty,
-## and turns on the ones the board applies.
+## showing the charges each has left this round and whether it's on this turn. A skill new to the run
+## (from the dev menu) starts with full charges; one the run lost turns off.
 func _refresh_skills() -> void:
-	board.warp = run.has_skill(Items.Skill.WARP)
+	for skill in run.skills:
+		if skill not in skill_charges:
+			skill_charges[skill] = Items.SKILL_CHARGES[skill]
+	for skill in active_skills.duplicate():
+		if not run.has_skill(skill):
+			active_skills.erase(skill)
+	board.warp = Items.Skill.WARP in active_skills
 	for child in skill_row.get_children():
 		skill_row.remove_child(child)
 		child.queue_free()
 	for i in Items.SKILL_SLOTS:
 		var slot := SkillSlot.new()
-		slot.skill = run.skills[i] if i < run.skills.size() else -1
+		if i < run.skills.size():
+			var skill := run.skills[i]
+			slot.skill = skill
+			slot.charges = skill_charges[skill]
+			slot.active = skill in active_skills
+			slot.pressed.connect(use_skill.bind(skill))
 		skill_row.add_child(slot)
+
+
+## Spends a charge of skill to turn it on for this turn, before Lock In. Does nothing while the cards
+## play, when it has no charges left or when it's already on.
+func use_skill(skill: Items.Skill) -> void:
+	if busy or win_panel.visible or shop.visible or not run.has_skill(skill):
+		return
+	var skill_name: String = Items.SKILLS[skill][0]
+	if skill in active_skills:
+		status_label.text = "%s is already on this turn." % skill_name.capitalize()
+		return
+	if skill_charges.get(skill, 0) <= 0:
+		status_label.text = "%s has no charges left this round." % skill_name.capitalize()
+		return
+	skill_charges[skill] -= 1
+	active_skills.append(skill)
+	match skill:
+		Items.Skill.WARP:
+			status_label.text = "Warp: the mouse wraps round the board's edges this turn."
+		Items.Skill.THICK_FUR:
+			status_label.text = "Thick Fur: the first trap the mouse lands on this turn breaks."
+		Items.Skill.HARD_HEAD:
+			status_label.text = "Hard Head: every bump this turn adds +%d mult." % Score.HARD_HEAD_MULT
+		Items.Skill.DAREDEVIL:
+			status_label.text = "Daredevil: end this turn next to danger for x%d mult." % Score.DAREDEVIL_TIMES
+	BugReport.note("Used %s (%d charge%s left this round)" % [skill_name, skill_charges[skill],
+		"" if skill_charges[skill] == 1 else "s"])
+	_refresh_skills()
+	_flash_skill(skill)
+	refresh_preview()
+
+
+## Turns off the skills used this turn, once its cards have played.
+func _end_skills() -> void:
+	if active_skills.is_empty():
+		return
+	BugReport.note("Skills wore off: %s" % ", ".join(active_skills.map(
+		func(skill: int) -> String: return Items.SKILLS[skill][0])))
+	active_skills.clear()
+	trap_survived = false
+	board.warp = false
+	_refresh_skills()
 
 
 ## Lights up the slot holding skill, when it does something.
@@ -1509,6 +1555,13 @@ func _view_pile(title: String, cards: Array[CardData]) -> void:
 
 
 # Dev menu: shortcuts the F2 DevMenu calls. The menu logs each one with a "DEV:" note.
+
+## Gives every skill the run has its full charges for this round back.
+func refill_skill_charges() -> void:
+	for skill in run.skills:
+		skill_charges[skill] = Items.SKILL_CHARGES[skill]
+	_refresh_skills()
+
 
 ## Redraws everything that shows the run: the HUD, pouch, trinkets, skills and an open shop.
 func refresh_ui() -> void:
@@ -1659,7 +1712,8 @@ func _bug_report_state() -> String:
 		trinket_names.append(Items.TRINKETS[trinket][0])
 	var skill_names := PackedStringArray()
 	for skill in run.skills:
-		skill_names.append(Items.SKILLS[skill][0])
+		skill_names.append("%s %d/%d%s" % [Items.SKILLS[skill][0], skill_charges.get(skill, 0),
+			Items.SKILL_CHARGES[skill], " (on)" if skill in active_skills else ""])
 	var pouch_names := PackedStringArray()
 	for item in run.pouch:
 		pouch_names.append(Items.CONSUMABLES[item][0])

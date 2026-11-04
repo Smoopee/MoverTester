@@ -178,14 +178,6 @@ func _draw_skill(skill_id: int, dark: Color) -> void:
 			_line([Vector2(-4, -4.5), Vector2(11.5, -4.5)], 2.2, color)
 			_line([Vector2(-11.5, 4.5), Vector2(3, 4.5)], 2.2, color)
 			_polygon([Vector2(8, 4.5), Vector2(2.5, 0.5), Vector2(2.5, 8.5)], color)
-		Items.Skill.EFFICIENT:
-			# Crumbs, and a card with a plus: a crumb buys a discard.
-			_circle(Vector2(-6, 5.5), 3.2, color)
-			_circle(Vector2(-9.5, 1), 2.2, color)
-			_circle(Vector2(-3.5, 0.5), 2, color)
-			_rect(Rect2(1.5, -9, 9.5, 14), color)
-			_line([Vector2(6.25, -5), Vector2(6.25, 1)], 1.8, dark)
-			_line([Vector2(3.25, -2), Vector2(9.25, -2)], 1.8, dark)
 		Items.Skill.THICK_FUR:
 			# A shield with a tuft of fur across it.
 			_polygon([Vector2(-8, -8), Vector2(0, -10.5), Vector2(8, -8), Vector2(8, -1), Vector2(5, 5),
@@ -198,9 +190,6 @@ func _draw_skill(skill_id: int, dark: Color) -> void:
 				var d := Vector2.from_angle(PI / 2 + PI / 4 + i * PI / 8)
 				_line([Vector2(3, 0) + d * 4, Vector2(3, 0) + d * 10], 1.8, color)
 			_circle(Vector2(3, 0), 2.2, color)
-		Items.Skill.SHOW_OFF:
-			# A five-pointed star.
-			_star(Vector2.ZERO, 10.5, color)
 		Items.Skill.DAREDEVIL:
 			# A warning sign.
 			_polygon([Vector2(0, -10.5), Vector2(11, 9), Vector2(-11, 9)], color)
