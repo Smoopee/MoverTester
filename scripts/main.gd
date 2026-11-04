@@ -188,6 +188,11 @@ var chest_note := ""
 var trap_survived := false
 ## Cards played from RECYCLE slots, returned to the next hand.
 var recycled: Array[CardData] = []
+## Set from the F2 dev menu: the cards left in the hand at Lock In stay in it for the next turn,
+## which draws only up to the hand size. Off, the whole hand is discarded each turn.
+var keep_hand := false
+## Cards left in the hand at the last Lock In, kept for the next hand (keep_hand).
+var kept: Array[CardData] = []
 ## Direction of the last step this turn, for ECHO. -1 before the first one.
 var last_dir := -1
 ## Set when the round's turns run out, which ends the run like being caught.
@@ -328,6 +333,7 @@ func new_round() -> void:
 	run.round_number += 1
 	run.deck.new_round()
 	recycled.clear()
+	kept.clear()
 	run.boss = -1
 	if force_boss != -1:
 		run.boss = force_boss
@@ -405,12 +411,15 @@ func start_turn() -> void:
 	# Beating a boss, or the dev menu, can have added a slot or a card.
 	_build_slots()
 	var drawn: Array[CardData] = []
+	drawn.append_array(kept)
 	drawn.append_array(recycled)
-	drawn.append_array(run.deck.draw(_hand_size() - recycled.size()))
+	drawn.append_array(run.deck.draw(maxi(0, _hand_size() - drawn.size())))
+	BugReport.note("Turn %d: hand %s%s" % [turn, _card_names(drawn),
+		" (kept %s)" % _card_names(kept) if kept else ""])
+	kept.clear()
 	recycled.clear()
 	for data in drawn:
 		hand_box.add_child(_make_card(data))
-	BugReport.note("Turn %d: hand %s" % [turn, _card_names(drawn)])
 	_roll_effects()
 	status_label.text = HINT
 	if run.boss != -1 and turn == 1:
@@ -431,7 +440,8 @@ func start_turn() -> void:
 	refresh_preview()
 
 
-## Plays the slotted cards in order, then discards everything and deals a new hand.
+## Plays the slotted cards in order, then discards them and deals the next hand. With keep_hand, the
+## cards left in the hand stay in it; without, they're discarded too.
 func lock_in() -> void:
 	# Lock In can still be reached with Tab under the win panel and the shop.
 	if busy or win_panel.visible or shop.visible:
@@ -499,6 +509,10 @@ func lock_in() -> void:
 	var played: Array[CardData] = []
 	for card in _all_cards():
 		var slot := card.get_parent() as CardSlot
+		# A card left in the hand stays there for the next turn.
+		if not slot and keep_hand and not ended:
+			kept.append(card.data)
+			continue
 		# The slot's effect and the card's stamp both apply. A burned card is gone, so nothing recycles it.
 		var effects: Array[CardSlot.Effect] = []
 		if slot:
@@ -1609,6 +1623,7 @@ func reset_deck() -> void:
 		return
 	run.deck.new_run()
 	recycled.clear()
+	kept.clear()
 	# A stamp picker that's open holds the old cards, which would take the stamp and the crumbs.
 	shop.close_picker()
 	if not win_panel.visible and not shop.visible:
@@ -1696,6 +1711,7 @@ func _bug_report_state() -> String:
 	lines.append("Draw pile (%d, top last): %s" % [run.deck.draw_pile.size(), _card_names(run.deck.draw_pile)])
 	lines.append("Discard (%d): %s" % [run.deck.discard_pile.size(), _card_names(run.deck.discard_pile)])
 	lines.append("Recycled: %s" % _card_names(recycled))
+	lines.append("Keep hand: %s" % ("on" if keep_hand else "off"))
 	lines.append("Last dir: %s" % (Card.NAMES[last_dir] if last_dir != -1 else "-"))
 	return "\n".join(lines)
 
