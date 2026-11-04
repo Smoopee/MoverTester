@@ -9,8 +9,10 @@ extends SceneTree
 ## (alley_king, runaway_cheese, kitchen_light): then every round is that boss, each on a fresh run.
 ## --slots N and --hand N start every run with that many card slots and cards in hand (boss wins add more, but bosses are off by default).
 ## --trinkets a,b starts every run with those trinkets (butter_pat, ride_ticket, ...), and --skills a,b
-## with those skills (hard_head, daredevil, ...), which the bot uses as soon as it can each round, to see
-## what they do to the score. --materials a,b makes
+## with those skills (hard_head, daredevil, ...) in place of the start-of-run skill draft. The bot uses
+## each ACTIVE skill's charges as soon as it can. Without --skills the bot takes a random pick from the
+## draft, as a player gets one, and the report shows how runs went by that skill; --draft off starts
+## runs with no skill. --materials a,b makes
 ## the starting deck's cards those materials (wood, shiny, gold, copper, paper, stone), taking turns.
 ## --keep-hand on keeps the cards not played in the hand for the next turn instead of discarding them (main.gd keep_hand).
 
@@ -29,6 +31,12 @@ var hand_size := 0
 var trinkets: Array[int] = []
 ## Items.Skill values each run starts with, at most Items.SKILL_SLOTS.
 var skills: Array[int] = []
+## Whether the bot takes a random skill from the start-of-run draft (off with --draft off or --skills).
+var draft := true
+## Per Items.Skill the bot drafted: [runs started with it, rounds those runs won].
+var skill_stats := {}
+## The skill this run drafted, or -1.
+var run_skill := -1
 ## Items.CardMaterial values the starting deck's cards are made of, in turn.
 var materials: Array[int] = []
 ## Whether cards left in the hand stay for the next turn (main.gd keep_hand).
@@ -87,6 +95,8 @@ func _initialize() -> void:
 				slot_count = clampi(args[i + 1].to_int(), 1, Run.MAX_SLOTS)
 			"--keep-hand":
 				keep_hand = args[i + 1] == "on"
+			"--draft":
+				draft = args[i + 1] != "off"
 			"--hand":
 				hand_size = clampi(args[i + 1].to_int(), 1, Run.MAX_HAND_SIZE)
 			"--trinkets":
@@ -132,6 +142,8 @@ func _run() -> void:
 	main.bosses_enabled = false
 	main.force_boss = boss
 	main.keep_hand = keep_hand
+	# The run main started on its own opened a skill draft.
+	_resolve_draft()
 	if boss != -1 or fixed_round > 0 or slot_count > 0 or hand_size > 0 or not trinkets.is_empty() \
 			or not skills.is_empty() or not materials.is_empty():
 		_new_run()
@@ -149,9 +161,27 @@ func _run() -> void:
 	quit()
 
 
+## Settles the skill draft a new run opens: a random pick (run_skill), or none with --draft off or
+## --skills.
+func _resolve_draft() -> void:
+	run_skill = -1
+	var skill_draft: SkillDraft = main.skill_draft
+	if not skill_draft.visible:
+		return
+	if not draft or not skills.is_empty():
+		skill_draft.hide()
+		return
+	run_skill = skill_draft.choices.pick_random()
+	skill_draft.take(run_skill)
+	if run_skill not in skill_stats:
+		skill_stats[run_skill] = [0, 0]
+	skill_stats[run_skill][0] += 1
+
+
 ## Starts a run, skipping ahead to fixed_round if one is set.
 func _new_run() -> void:
 	main.new_run()
+	_resolve_draft()
 	if not trinkets.is_empty() or not skills.is_empty():
 		main.run.trinkets.assign(trinkets)
 		main.run.skills.assign(skills)
@@ -181,9 +211,9 @@ func _play_round() -> void:
 		if main.turn > MAX_TURNS:
 			unfinished += 1
 			return
-		# Skills only work on the turns they're used: the bot spends every charge as soon as it can.
+		# ACTIVE skills only work on the turns they're used: the bot spends every charge as soon as it can.
 		for skill: Items.Skill in main.run.skills:
-			if main.skill_charges.get(skill, 0) > 0:
+			if Items.skill_use(skill) == Items.SkillUse.ACTIVE and main.skill_charges.get(skill, 0) > 0:
 				main.use_skill(skill)
 		var used := _place_cards()
 		var before := _distance()
@@ -219,6 +249,8 @@ func _play_round() -> void:
 		tally[2] += 1
 	else:
 		tally[1] += 1
+		if run_skill != -1:
+			skill_stats[run_skill][1] += 1
 		tally[5] += main.turn
 		tally[7] += main.round_score
 		if main.round_score >= main.score_target:
@@ -362,6 +394,13 @@ func _report() -> void:
 	print("Crumbs per won round: %.1f (%.1f picked up on the board)" % [
 		float(won_crumbs) / n, float(crumbs_picked_up) / n])
 	print("Chests: %d rounds had one, the bot opened %d (it doesn't go for them)" % [chest_rounds, chests_opened])
+	if not skill_stats.is_empty():
+		# The bot never shops or beats a boss, so a run keeps the one skill it drafted at the start.
+		print("\n%-14s %6s %16s" % ["Drafted skill", "runs", "rounds won/run"])
+		for skill: int in Items.Skill.values():
+			if skill in skill_stats:
+				var stats: Array = skill_stats[skill]
+				print("%-14s %6d %16.2f" % [Items.skill_name(skill), stats[0], float(stats[1]) / stats[0]])
 
 	print("\nCells gained per turn with cards only in plain slots: %.2f" % [
 		float(plain_gain) / max(plain_turns, 1)])

@@ -273,10 +273,10 @@ func _build_run_tab(box: VBoxContainer) -> void:
 	_button(row, "-1", _add_bosses_beaten.bind(-1))
 	_button(row, "+1", _add_bosses_beaten.bind(1))
 
-	_heading(box, "Shop")
+	_heading(box, "Shop and skill draft")
 	row = _row(box)
-	_button(row, "Open shop", _open_shop.bind(false))
-	_button(row, "Open boss shop", _open_shop.bind(true))
+	_button(row, "Open shop", _open_shop)
+	_button(row, "Draft a skill", _open_draft)
 
 	_heading(box, "Cheats")
 	row = _row(box)
@@ -362,16 +362,19 @@ func _build_items_tab(box: VBoxContainer) -> void:
 
 	_heading(box, "Skills (up to %d)" % Items.SKILL_SLOTS)
 	for skill: Items.Skill in Items.Skill.values():
-		var info: Array = Items.SKILLS[skill]
+		var skill_row := _row(box)
 		var check := CheckBox.new()
-		check.text = info[0]
+		check.text = Items.skill_name(skill)
 		check.icon = ItemIcon.skill(skill)
-		check.tooltip_text = info[1]
+		check.tooltip_text = "%s\n%s" % [Items.skill_text(skill, 1), Items.skill_use_text(skill, 1)]
 		check.focus_mode = Control.FOCUS_NONE
 		check.add_theme_color_override("font_color", Items.SKILL_COLOR)
 		check.toggled.connect(_set_skill.bind(skill))
-		box.add_child(check)
+		skill_row.add_child(check)
 		_skill_boxes[skill] = check
+		if Items.skill_max_level(skill) > 1:
+			_button(skill_row, "Lv -", _level_skill.bind(skill, -1))
+			_button(skill_row, "Lv +", _level_skill.bind(skill, 1))
 	_button(_row(box), "Refill skill charges", func() -> void:
 		game.refill_skill_charges()
 		_did("Refilled the skill charges"))
@@ -739,11 +742,25 @@ func _add_bosses_beaten(by: int) -> void:
 	_did("Bosses beaten %d" % game.run.bosses_beaten)
 
 
-func _open_shop(free_trinket: bool) -> void:
+func _open_shop() -> void:
 	if _idle():
 		game.win_panel.hide()
-		game.shop.open(game.run, free_trinket)
-		_did("Opened the %sshop" % ("boss " if free_trinket else ""))
+		game.skill_draft.hide()
+		game.shop.open(game.run)
+		_did("Opened the shop")
+
+
+## Opens a skill draft over whatever is up, as at the start of a run: picking closes it.
+func _open_draft() -> void:
+	if not _idle():
+		return
+	if game.run.draft_pool().is_empty():
+		_say("Nothing left to draft: the skill slots are full and every skill is at its top level.")
+		return
+	game.win_panel.hide()
+	game.shop.hide()
+	game._open_draft(false)
+	_did("Opened a skill draft")
 
 
 func _set_speed(index: int) -> void:
@@ -787,11 +804,23 @@ func _set_skill(on: bool, skill: Items.Skill) -> void:
 		if game.run.skills.size() >= Items.SKILL_SLOTS:
 			_say("The skill slots are full.")
 			return
-		game.run.skills.append(skill)
+		game.run.add_skill(skill)
 	elif not on:
-		game.run.skills.erase(skill)
+		game.run.remove_skill(skill)
 	game.refresh_ui()
-	_did("%s %s" % ["Added" if on else "Removed", Items.SKILLS[skill][0]])
+	_did("%s %s" % ["Added" if on else "Removed", Items.skill_name(skill)])
+
+
+## Moves an owned skill's level by step, between 1 and its top level, with full charges at the new one.
+func _level_skill(skill: Items.Skill, step: int) -> void:
+	if not game.run.has_skill(skill):
+		_say("The run doesn't have %s." % Items.skill_name(skill))
+		return
+	var level := clampi(game.run.skill_level(skill) + step, 1, Items.skill_max_level(skill))
+	game.run.skill_levels[skill] = level
+	game.skill_charges.erase(skill)
+	game.refresh_ui()
+	_did("%s is level %d" % [Items.skill_name(skill), level])
 
 
 func _set_slot_effect(index: int, slot: int) -> void:

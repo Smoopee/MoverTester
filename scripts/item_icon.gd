@@ -195,6 +195,50 @@ func _draw_skill(skill_id: int, dark: Color) -> void:
 			_polygon([Vector2(0, -10.5), Vector2(11, 9), Vector2(-11, 9)], color)
 			_line([Vector2(0, -3.5), Vector2(0, 3)], 2.2, dark)
 			_circle(Vector2(0, 6), 1.3, dark)
+		Items.Skill.SPRINT:
+			# Two chevrons racing right, with speed lines behind them.
+			for x: float in [-3.0, 4.5]:
+				_line([Vector2(x - 3, -7), Vector2(x + 3.5, 0), Vector2(x - 3, 7)], 2.6, color)
+			for y: float in [-4.0, 0.0, 4.0]:
+				_line([Vector2(-11.5, y), Vector2(-7.5, y)], 1.4, Color(color, 0.6))
+		Items.Skill.BURROW:
+			# A wall, and a tunnel arcing under it to a mound of dirt.
+			_rect(Rect2(-1.5, -11, 3, 13), color)
+			_line(_arc(Vector2(0, 0), 8, PI, 0.0, 12), 2.2, color)
+			_ellipse(Vector2(8.5, 1), Vector2(3, 2), 0.0, color.lightened(0.3))
+			_polygon([Vector2(-11, 1), Vector2(-8, -1.5), Vector2(-5, 1)], color.lightened(0.3))
+			_line([Vector2(-12, 2.5), Vector2(12, 2.5)], 1.2, dark)
+		Items.Skill.NINE_LIVES:
+			# A heart, ringed by an arrow coming back round to its start.
+			var ring := _arc(Vector2(0, 0), 10.5, -PI * 0.35, PI * 1.45, 18)
+			_line(ring, 1.6, color)
+			var tip: Vector2 = ring[0]
+			_polygon([tip + Vector2(3, -1.5), tip + Vector2(-2, -3), tip + Vector2(-0.5, 2.5)], color)
+			_circle(Vector2(-2.6, -2), 3.3, color)
+			_circle(Vector2(2.6, -2), 3.3, color)
+			_polygon([Vector2(-5.8, -1), Vector2(5.8, -1), Vector2(0, 6.5)], color)
+		Items.Skill.KEEN_WHISKERS:
+			# A mouse's nose, with whiskers fanning out each side.
+			_ellipse(Vector2(0, 2), Vector2(5, 4), 0.0, color.lightened(0.35))
+			_circle(Vector2(0, -0.5), 2.4, color)
+			for side: float in [-1.0, 1.0]:
+				for y: float in [-4.5, 0.0, 4.5]:
+					_line([Vector2(3.5 * side, 1), Vector2(11.5 * side, y)], 1.2, color)
+		Items.Skill.PACK_RAT:
+			# A fan of three cards, held on to.
+			for i in 3:
+				var angle := (i - 1) * 0.35
+				var c := Vector2(0, 3).rotated(angle) + Vector2(0, -3)
+				var card := [Vector2(-4, -7), Vector2(4, -7), Vector2(4, 7), Vector2(-4, 7)].map(
+					func(p: Vector2) -> Vector2: return c + p.rotated(angle))
+				_polygon(card, color.lightened(0.15 * i))
+				_line(card + [card[0]], 1, dark)
+		Items.Skill.SHOW_OFF:
+			# A big star with sparkles round it.
+			_star(Vector2(0, 1), 9, color)
+			_star(Vector2(-9, -8), 3, color.lightened(0.3))
+			_star(Vector2(9.5, -7), 2.5, color.lightened(0.3))
+			_star(Vector2(9, 9), 2, color.lightened(0.3))
 
 
 func _draw_consumable(consumable_id: int, dark: Color) -> void:
