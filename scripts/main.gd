@@ -148,6 +148,7 @@ const FIZZLED := Color(1, 0.5, 0.5, 0.6)
 var run := Run.new()
 var pile_viewer := PileViewer.new()
 var shop := Shop.new()
+var skill_draft := SkillDraft.new()
 ## Shown under the win panel's button once the run is won, to start over instead of going on.
 var new_run_button := Button.new()
 var slots: Array[CardSlot] = []
@@ -184,19 +185,26 @@ var _pending_points: Dictionary[Vector2i, int] = {}
 var chest_rewards := PackedStringArray()
 ## Shown in place of the hint at the start of the next turn, after a chest is opened.
 var chest_note := ""
-## Whether THICK FUR has already broken a trap this turn.
-var trap_survived := false
+## Traps THICK FUR has broken this turn.
+var traps_broken := 0
 ## Charges each of the run's skills has left this round (Items.Skill -> count), refilled from
-## Items.SKILL_CHARGES at the start of every round.
+## Items.skill_charges at the start of every round. PASSIVE skills have none.
 var skill_charges: Dictionary[int, int] = {}
-## Skills used this turn, on until the turn's cards have played (use_skill).
+## ACTIVE skills used this turn, on until the turn's cards have played (use_skill).
 var active_skills: Array[int] = []
+## Where the mouse was when this turn's cards started to play, for NINE LIVES.
+var turn_start_cell := Vector2i.ZERO
+## Set when NINE LIVES saved the mouse during this turn's cards: the rest of them don't play.
+var escaped := false
+## Whether the skill draft that's open is a boss's reward, which leads on to the shop.
+var _draft_after_boss := false
 ## Cards played from RECYCLE slots, returned to the next hand.
 var recycled: Array[CardData] = []
 ## Set from the F2 dev menu: the cards left in the hand at Lock In stay in it for the next turn,
-## which draws only up to the hand size. Off, the whole hand is discarded each turn.
+## which draws only up to the hand size. Off, the whole hand is discarded each turn. PACK RAT keeps
+## up to Items.PACK_RAT_CARDS of them (_cards_kept).
 var keep_hand := false
-## Cards left in the hand at the last Lock In, kept for the next hand (keep_hand).
+## Cards left in the hand at the last Lock In, kept for the next hand (_cards_kept).
 var kept: Array[CardData] = []
 ## Direction of the last step this turn, for ECHO. -1 before the first one.
 var last_dir := -1
@@ -296,6 +304,8 @@ func _ready() -> void:
 	add_child(pile_viewer)
 	shop.next_round_pressed.connect(new_round)
 	add_child(shop)
+	skill_draft.picked.connect(_on_skill_picked)
+	add_child(skill_draft)
 	var bug_report := BugReport.new()
 	bug_report.get_state = _bug_report_state
 	add_child(bug_report)
@@ -326,11 +336,36 @@ func _add_touch_button(text: String, on_pressed: Callable) -> void:
 	trinket_row.get_parent().add_child(button)
 
 
-## Starts over with the starting deck, no crumbs and no items.
+## Starts over with the starting deck, no crumbs and no items, then drafts the run's first skill over
+## the first round's board.
 func new_run() -> void:
 	run = Run.new()
 	BugReport.note("New run")
 	new_round()
+	_open_draft(false)
+
+
+## Opens a skill draft: the run's first skill, or a boss's reward (after_boss). Returns false, opening
+## nothing, when there's nothing left to offer.
+func _open_draft(after_boss: bool) -> bool:
+	_draft_after_boss = after_boss
+	var title := "Boss reward: pick a skill" if after_boss else "Pick your first skill"
+	var subtitle := "Yours for the whole run. You'll pick another after each boss."
+	if after_boss:
+		subtitle = "A new skill, or the next level of one you have." if run.skills.size() < Items.SKILL_SLOTS \
+			else "Your skill slots are full: pick one to level up."
+	var opened := skill_draft.open(run, SkillDraft.roll(run), title, subtitle)
+	if opened:
+		refresh_preview()
+	return opened
+
+
+## A skill was drafted: it starts with full charges, and a boss's reward goes on to the shop.
+func _on_skill_picked(skill: Items.Skill) -> void:
+	skill_charges.erase(skill)
+	if _draft_after_boss:
+		shop.open(run)
+	refresh_ui()
 
 
 func new_round() -> void:
@@ -406,6 +441,7 @@ func new_round() -> void:
 	win_panel.hide()
 	pile_viewer.hide()
 	shop.hide()
+	skill_draft.hide()
 	_refresh_trinkets()
 	_refresh_skills()
 	Music.play(Music.Song.BOSS if run.boss != -1 else Music.Song.BOARD)
@@ -449,8 +485,8 @@ func start_turn() -> void:
 ## Plays the slotted cards in order, then discards them and deals the next hand. With keep_hand, the
 ## cards left in the hand stay in it; without, they're discarded too.
 func lock_in() -> void:
-	# Lock In can still be reached with Tab under the win panel and the shop.
-	if busy or win_panel.visible or shop.visible:
+	# Lock In can still be reached with Tab under the win panel, the shop and the skill draft.
+	if busy or win_panel.visible or shop.visible or skill_draft.visible:
 		return
 	busy = true
 	Sfx.play(Sfx.Sound.LOCK_IN)
@@ -470,18 +506,20 @@ func lock_in() -> void:
 	refresh_preview()
 	turn_points = 0
 	turn_mult = 1
+	turn_start_cell = board.mouse_cell
 	var order := _play_order()
 	var reached := await _play_cards(order)
 	_score_cards()
 	_pay_stones()
 	# Set when the mouse reaches the cheese or is caught in a trap.
 	var ended := _round_over()
-	# Glue holds the mouse: the cards left don't move it.
-	if board.stuck and not ended:
+	# Glue holds the mouse, or NINE LIVES got it away: the cards left don't move it.
+	if (board.stuck or escaped) and not ended:
 		for slot in order.slice(reached):
 			if slot.get_card():
 				slot.get_card().modulate = FIZZLED
-		status_label.text = "Stuck in glue! The rest of this turn's cards don't move the mouse."
+		if not escaped:
+			status_label.text = "Stuck in glue! The rest of this turn's cards don't move the mouse."
 		if board.animate:
 			await get_tree().create_timer(Board.STEP_TIME * 2, false).timeout
 	if board.squeeze:
@@ -508,6 +546,8 @@ func lock_in() -> void:
 		ended = await board.fire_hazards()
 		BugReport.note("Pylons and flamethrowers: %s%s" % [_hazard_labels(),
 			", the %s caught the mouse" % Hazard.NAMES[board.blasted_by.kind] if ended else ""])
+		if ended and await _spend_life():
+			ended = false
 	if not ended and turn >= turn_limit:
 		out_of_time = true
 		ended = true
@@ -517,7 +557,7 @@ func lock_in() -> void:
 	for card in _all_cards():
 		var slot := card.get_parent() as CardSlot
 		# A card left in the hand stays there for the next turn.
-		if not slot and keep_hand and not ended:
+		if not slot and kept.size() < _cards_kept() and not ended:
 			kept.append(card.data)
 			continue
 		# The slot's effect and the card's stamp both apply. A burned card is gone, so nothing recycles it.
@@ -552,11 +592,13 @@ func lock_in() -> void:
 func _play_cards(order: Array[CardSlot], preview := false) -> int:
 	last_dir = -1
 	board.stuck = false
+	traps_broken = 0
+	escaped = false
 	var ended := false
 	# Until a card plays, for SCURRY.
 	var first := true
 	var i := 0
-	while i < order.size() and not ended and not board.stuck:
+	while i < order.size() and not ended and not board.stuck and not escaped:
 		var slot := order[i]
 		var card := slot.get_card()
 		if card == null:
@@ -597,6 +639,9 @@ func _play_cards(order: Array[CardSlot], preview := false) -> int:
 			_play_material(card)
 		if ended and _survive_trap():
 			ended = false
+		# The preview shows the catch: NINE LIVES is for when it goes wrong anyway.
+		elif ended and not preview and await _spend_life():
+			ended = false
 		if card.modulate == PLAYING:
 			card.modulate = PLAYED
 		first = false
@@ -608,25 +653,39 @@ func _round_over() -> bool:
 	return board.mouse_cell == board.cheese_cell or board.is_caught()
 
 
-## Shows or hides the preview to match preview_on (dev menu), at the end of the frame, once however
-## many times it's called in the frame.
+## Whether the preview is drawn: the dev menu's preview_on, or the KEEN WHISKERS skill.
+func _previewing() -> bool:
+	return preview_on or run.has_skill(Items.Skill.KEEN_WHISKERS)
+
+
+## How many of the cards left in the hand at Lock In stay for the next turn, the leftmost first: all of
+## them with the dev menu's keep_hand, Items.PACK_RAT_CARDS with the PACK RAT skill, else none.
+func _cards_kept() -> int:
+	if keep_hand:
+		return Run.MAX_HAND_SIZE
+	return Items.PACK_RAT_CARDS if run.has_skill(Items.Skill.PACK_RAT) else 0
+
+
+## Shows or hides the preview to match _previewing, at the end of the frame, once however many times
+## it's called in the frame.
 func refresh_preview() -> void:
 	if not _preview_queued:
 		_preview_queued = true
 		_update_preview.call_deferred()
 
 
-## While preview_on is set, plays this turn's cards on a hidden copy of the board and draws
-## where they take the mouse on the board. None of it counts: the crumbs and chests on the way stay
-## put, and the cards, the status line, THICK FUR and the log are left as they were.
+## While _previewing, plays this turn's cards on a hidden copy of the board and draws where they take
+## the mouse on the board. None of it counts: the crumbs and chests on the way stay put, and the cards,
+## the status line, THICK FUR and the log are left as they were. NINE LIVES doesn't save the mouse in
+## it, so a catch shows.
 func _update_preview() -> void:
 	_preview_queued = false
-	if not preview_on or busy or win_panel.visible or shop.visible:
+	if not _previewing() or busy or win_panel.visible or shop.visible or skill_draft.visible:
 		board.show_preview([], Board.PreviewEnd.MOVED)
 		return
 	var real := board
 	var status := status_label.text
-	var fur_used := trap_survived
+	var fur_used := traps_broken
 	var dir_before := last_dir
 	var cards := _all_cards()
 	var tints: Array[Color] = []
@@ -657,7 +716,7 @@ func _update_preview() -> void:
 	board = real
 	_preview_board.recording = false
 	status_label.text = status
-	trap_survived = fur_used
+	traps_broken = fur_used
 	last_dir = dir_before
 	for i in cards.size():
 		cards[i].modulate = tints[i]
@@ -728,7 +787,8 @@ func _end_round() -> void:
 			run.bosses_beaten += 1
 			win_label.text = "You beat %s in %d turn%s!" % [Boss.INFO[run.boss][0], turn, "" if turn == 1 else "s"]
 			lines.append_array(_boss_upgrade())
-			lines.append("Take a free trinket in the shop.")
+			if not run.draft_pool().is_empty():
+				lines.append("Pick a skill next.")
 		if won_run():
 			BugReport.note("Won the run on round %d" % run.round_number)
 			win_label.text = "You won the run!"
@@ -737,7 +797,8 @@ func _end_round() -> void:
 		lines.append("Next round: %s, score target %d." % [Difficulty.describe(next),
 			Score.target(next, bosses_enabled and Boss.is_boss_round(next))])
 		win_details.text = "\n".join(lines)
-		win_panel_button.text = "Endless" if won_run() else "Shop"
+		win_panel_button.text = "Endless" if won_run() else (
+			"Pick a Skill" if run.boss != -1 and not run.draft_pool().is_empty() else "Shop")
 	new_run_button.visible = won_run()
 	status_label.text = ""
 	win_panel.show()
@@ -755,7 +816,9 @@ func _on_win_panel_button() -> void:
 			run.endless = true
 			BugReport.note("Going on in endless mode")
 		win_panel.hide()
-		shop.open(run, run.boss != -1)
+		# A boss's reward is a skill draft, which goes on to the shop once a skill is picked.
+		if run.boss == -1 or not _open_draft(true):
+			shop.open(run)
 
 
 ## True when the round ended the run: the mouse was caught, the turns ran out, or it reached the
@@ -793,9 +856,10 @@ func _on_mouse_moved(motion: Board.Motion, cells: int) -> void:
 				turn_mult += Score.RIDE_TICKET_MULT
 				_pop_mult("+%d mult" % Score.RIDE_TICKET_MULT)
 		Board.Motion.BUMP:
-			if Items.Skill.HARD_HEAD in active_skills:
-				turn_mult += Score.HARD_HEAD_MULT
-				_pop_mult("+%d mult" % Score.HARD_HEAD_MULT)
+			if run.has_skill(Items.Skill.HARD_HEAD):
+				var mult := Score.hard_head_mult(run.skill_level(Items.Skill.HARD_HEAD))
+				turn_mult += mult
+				_pop_mult("+%d mult" % mult)
 				_flash_skill(Items.Skill.HARD_HEAD)
 	_refresh_hud()
 
@@ -841,17 +905,25 @@ func _pay_stones() -> void:
 	_refresh_hud()
 
 
-## Adds the mult that goes by how the cards played: DAREDEVIL, when it's on this turn and the cards
-## left the mouse next to a trap, a cat or a cat's path.
+## Adds the mult that goes by how the cards played: DAREDEVIL when they left the mouse next to a trap,
+## a cat or a cat's path, and SHOW-OFF when every slot that isn't blocked held a card.
 func _score_cards() -> void:
-	if Items.Skill.DAREDEVIL in active_skills and not _round_over():
+	if run.has_skill(Items.Skill.DAREDEVIL) and not _round_over():
+		var times := Score.daredevil_times(run.skill_level(Items.Skill.DAREDEVIL))
 		for offset: Vector2i in Card.OFFSETS.values():
 			if board.is_deadly(board.mouse_cell + offset):
-				turn_mult *= Score.DAREDEVIL_TIMES
-				_pop_mult("×%d mult" % Score.DAREDEVIL_TIMES)
+				turn_mult *= times
+				_pop_mult("×%d mult" % times)
 				BugReport.note("  DAREDEVIL: next to danger at %s" % (board.mouse_cell + offset))
 				_flash_skill(Items.Skill.DAREDEVIL)
 				break
+	if run.has_skill(Items.Skill.SHOW_OFF) and slots.all(func(slot: CardSlot) -> bool:
+			return slot.effect == CardSlot.Effect.BLOCKED or slot.get_card() != null):
+		var times := Score.show_off_times(run.skill_level(Items.Skill.SHOW_OFF))
+		turn_mult *= times
+		_pop_mult("×%d mult" % times)
+		BugReport.note("  SHOW-OFF: every slot filled")
+		_flash_skill(Items.Skill.SHOW_OFF)
 	_refresh_hud()
 
 
@@ -915,18 +987,56 @@ func pop_turn_score(gained: int, points: int, mult: int) -> void:
 		.from(Color.WHITE.lerp(Color(2.2, 2.2, 1.6), 0.4 + 0.6 * strength))
 
 
-## If the mouse is on a trap, THICK FUR is on this turn and hasn't broken a trap yet, breaks the trap
-## and returns true so the turn carries on.
+## If the mouse is on a trap and THICK FUR hasn't broken as many traps this turn as its level, breaks
+## the trap and returns true so the turn carries on.
 func _survive_trap() -> bool:
-	if not board.is_trapped() or trap_survived or Items.Skill.THICK_FUR not in active_skills:
+	if not board.is_trapped() or traps_broken >= run.skill_level(Items.Skill.THICK_FUR):
 		return false
-	trap_survived = true
+	traps_broken += 1
 	board.remove_trap(board.mouse_cell)
 	BugReport.note("  THICK FUR broke the trap at %s" % board.mouse_cell)
 	status_label.text = "Thick Fur! The trap broke."
 	# The preview's board doesn't animate, and the preview shouldn't light up the skill.
 	if board.animate:
 		_flash_skill(Items.Skill.THICK_FUR)
+	return true
+
+
+## If the mouse was just caught and NINE LIVES has a life left this round, spends it and returns true
+## so the round goes on. Caught by a trap or a cat during the cards, the mouse escapes back to the cell
+## it started the turn on (turn_start_cell, which the cats' paths never cover) and the turn's other
+## cards don't play (escaped). A blast at the end of the turn, it shrugs off where it is.
+func _spend_life() -> bool:
+	var skill := Items.Skill.NINE_LIVES
+	if not board.is_caught() or skill_charges.get(skill, 0) <= 0 or not run.has_skill(skill):
+		return false
+	skill_charges[skill] -= 1
+	var left := skill_charges[skill]
+	if board.is_blasted():
+		board.blasted_by = null
+		board.queue_redraw()
+		BugReport.note("  NINE LIVES: shrugged off the blast (%d left this round)" % left)
+		status_label.text = "Nine Lives! The mouse shrugged off the blast."
+	else:
+		var caught_at := board.mouse_cell
+		escaped = true
+		# A floorboard the mouse broke leaving its start would leave it standing over a gap.
+		if turn_start_cell in board.broken:
+			board.broken.erase(turn_start_cell)
+			board.floorboards.append(turn_start_cell)
+		board.mouse_cell = turn_start_cell
+		if board.animate:
+			var tween := board.create_tween()
+			tween.tween_property(board, "mouse_pos", Vector2(turn_start_cell), Board.JUMP_TIME * 1.5) \
+				.set_trans(Tween.TRANS_SINE)
+			await tween.finished
+		else:
+			board.mouse_pos = Vector2(turn_start_cell)
+		BugReport.note("  NINE LIVES: escaped from %s back to %s (%d left this round)" % [caught_at,
+			turn_start_cell, left])
+		status_label.text = "Nine Lives! The mouse escaped back to where it started the turn."
+	_flash_skill(skill)
+	_refresh_skills()
 	return true
 
 
@@ -978,7 +1088,26 @@ func _play(slot: CardSlot, card: Card, first: bool) -> bool:
 					return false
 	if moved:
 		return false
-	return await _steps(dir, 1)
+	return await _single_step(dir)
+
+
+## A card's move when neither its slot nor its stamp moves the mouse: a step, or two with SPRINT on,
+## each a TUNNEL jump with BURROW on. Returns true if the round is over.
+func _single_step(dir: Card.Dir) -> bool:
+	var sprint := Items.Skill.SPRINT in active_skills
+	var burrow := Items.Skill.BURROW in active_skills
+	if board.animate:
+		for skill: Items.Skill in [Items.Skill.SPRINT, Items.Skill.BURROW]:
+			if skill in active_skills:
+				_flash_skill(skill)
+	if not burrow:
+		return await _steps(dir, 2 if sprint else 1)
+	for i in 2 if sprint else 1:
+		if await _move(CardSlot.Effect.TUNNEL, dir) and not _survive_trap():
+			return true
+		if board.stuck:
+			break
+	return false
 
 
 ## Makes the move of an effect that changes the distance. Returns true if the round is over.
@@ -1290,7 +1419,10 @@ func _on_card_dropped_on_card(card: Card, target: Card) -> void:
 	if parent is CardSlot:
 		_place_in_slot(card, parent)
 	else:
+		# In the hand, it takes the target's place, so the hand can be put in order (PACK RAT keeps
+		# the leftmost cards).
 		_drop_on_hand(Vector2.ZERO, card)
+		hand_box.move_child(card, target.get_index())
 
 
 ## Puts a card in a slot. A card already there swaps to where the incoming card came from.
@@ -1454,12 +1586,12 @@ func _refresh_trinkets() -> void:
 
 
 ## Fills the Items.SKILL_SLOTS skill slots above the card slots with the run's skills, the rest empty,
-## showing the charges each has left this round and whether it's on this turn. A skill new to the run
-## (from the dev menu) starts with full charges; one the run lost turns off.
+## showing each one's level, the charges it has left this round and whether it's on this turn. A skill
+## new to the run (drafted, or from the dev menu) starts with full charges; one the run lost turns off.
 func _refresh_skills() -> void:
 	for skill in run.skills:
 		if skill not in skill_charges:
-			skill_charges[skill] = Items.SKILL_CHARGES[skill]
+			skill_charges[skill] = Items.skill_charges(skill, run.skill_level(skill))
 	for skill in active_skills.duplicate():
 		if not run.has_skill(skill):
 			active_skills.erase(skill)
@@ -1472,36 +1604,39 @@ func _refresh_skills() -> void:
 		if i < run.skills.size():
 			var skill := run.skills[i]
 			slot.skill = skill
+			slot.level = run.skill_level(skill)
 			slot.charges = skill_charges[skill]
 			slot.active = skill in active_skills
 			slot.pressed.connect(use_skill.bind(skill))
 		skill_row.add_child(slot)
 
 
-## Spends a charge of skill to turn it on for this turn, before Lock In. Does nothing while the cards
-## play, when it has no charges left or when it's already on.
+## Spends a charge of an ACTIVE skill to turn it on for this turn, before Lock In. Does nothing while
+## the cards play, when it has no charges left or when it's already on. A PASSIVE or AUTO skill says
+## that it works by itself.
 func use_skill(skill: Items.Skill) -> void:
-	if busy or win_panel.visible or shop.visible or not run.has_skill(skill):
+	if busy or win_panel.visible or shop.visible or skill_draft.visible or not run.has_skill(skill):
 		return
-	var skill_name: String = Items.SKILLS[skill][0]
+	var skill_name := Items.skill_name(skill).capitalize()
+	if Items.skill_use(skill) != Items.SkillUse.ACTIVE:
+		status_label.text = "%s works by itself." % skill_name
+		return
 	if skill in active_skills:
-		status_label.text = "%s is already on this turn." % skill_name.capitalize()
+		status_label.text = "%s is already on this turn." % skill_name
 		return
 	if skill_charges.get(skill, 0) <= 0:
-		status_label.text = "%s has no charges left this round." % skill_name.capitalize()
+		status_label.text = "%s has no charges left this round." % skill_name
 		return
 	skill_charges[skill] -= 1
 	active_skills.append(skill)
 	match skill:
 		Items.Skill.WARP:
 			status_label.text = "Warp: the mouse wraps round the board's edges this turn."
-		Items.Skill.THICK_FUR:
-			status_label.text = "Thick Fur: the first trap the mouse lands on this turn breaks."
-		Items.Skill.HARD_HEAD:
-			status_label.text = "Hard Head: every bump this turn adds +%d mult." % Score.HARD_HEAD_MULT
-		Items.Skill.DAREDEVIL:
-			status_label.text = "Daredevil: end this turn next to danger for x%d mult." % Score.DAREDEVIL_TIMES
-	BugReport.note("Used %s (%d charge%s left this round)" % [skill_name, skill_charges[skill],
+		Items.Skill.SPRINT:
+			status_label.text = "Sprint: every card that would take one step takes two this turn."
+		Items.Skill.BURROW:
+			status_label.text = "Burrow: every card that would take one step digs 2 cells, under walls, this turn."
+	BugReport.note("Used %s (%d charge%s left this round)" % [Items.skill_name(skill), skill_charges[skill],
 		"" if skill_charges[skill] == 1 else "s"])
 	_refresh_skills()
 	_flash_skill(skill)
@@ -1513,9 +1648,8 @@ func _end_skills() -> void:
 	if active_skills.is_empty():
 		return
 	BugReport.note("Skills wore off: %s" % ", ".join(active_skills.map(
-		func(skill: int) -> String: return Items.SKILLS[skill][0])))
+		func(skill: int) -> String: return Items.skill_name(skill))))
 	active_skills.clear()
-	trap_survived = false
 	board.warp = false
 	_refresh_skills()
 
@@ -1558,8 +1692,7 @@ func _view_pile(title: String, cards: Array[CardData]) -> void:
 
 ## Gives every skill the run has its full charges for this round back.
 func refill_skill_charges() -> void:
-	for skill in run.skills:
-		skill_charges[skill] = Items.SKILL_CHARGES[skill]
+	skill_charges.clear()
 	_refresh_skills()
 
 
@@ -1712,15 +1845,18 @@ func _bug_report_state() -> String:
 		trinket_names.append(Items.TRINKETS[trinket][0])
 	var skill_names := PackedStringArray()
 	for skill in run.skills:
-		skill_names.append("%s %d/%d%s" % [Items.SKILLS[skill][0], skill_charges.get(skill, 0),
-			Items.SKILL_CHARGES[skill], " (on)" if skill in active_skills else ""])
+		var level := run.skill_level(skill)
+		var total := Items.skill_charges(skill, level)
+		skill_names.append("%s%s%s" % [Items.skill_title(skill, level),
+			" %d/%d" % [skill_charges.get(skill, 0), total] if total > 0 else "",
+			" (on)" if skill in active_skills else ""])
 	var pouch_names := PackedStringArray()
 	for item in run.pouch:
 		pouch_names.append(Items.CONSUMABLES[item][0])
 	lines.append("Crumbs %d (%d picked up this round), trinkets: %s, skills: %s, pouch: %s%s" % [run.crumbs,
 		round_crumbs, ", ".join(trinket_names) if trinket_names else "-",
 		", ".join(skill_names) if skill_names else "-", ", ".join(pouch_names) if pouch_names else "-",
-		", thick fur used" if trap_survived else ""])
+		", thick fur broke %d" % traps_broken if traps_broken > 0 else ""])
 	lines.append("Mouse %s facing %s, cheese %s, distance %d (%d by path)%s" % [board.mouse_cell,
 		Card.NAMES[board.facing], board.cheese_cell, _distance(board.mouse_cell, board.cheese_cell),
 		_path_distance(board.mouse_cell, board.cheese_cell), ", squeezing" if board.squeeze else ""])

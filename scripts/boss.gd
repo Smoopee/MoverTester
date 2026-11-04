@@ -2,7 +2,8 @@ class_name Boss
 extends RefCounted
 ## Boss rounds: every EVERY rounds, a round with a rule that makes it harder. The shop before one says
 ## which boss is next. Beating a boss pays WIN_CRUMBS, adds HAND_GAINED cards in hand and SLOTS_GAINED
-## card slots for the rest of the run (Main._boss_upgrade), and gives a free trinket.
+## card slots for the rest of the run (Main._boss_upgrade), and drafts a skill (SkillDraft): a new one,
+## or the next level of one the run has.
 
 enum Kind { ALLEY_KING, RUNAWAY_CHEESE, KITCHEN_LIGHT }
 
@@ -13,8 +14,6 @@ const WIN_CRUMBS := 10
 ## Cards in hand and card slots each boss beaten adds, up to Run.MAX_HAND_SIZE and Run.MAX_SLOTS.
 const HAND_GAINED := 1
 const SLOTS_GAINED := 1
-## Trinkets offered for free after a boss, of which the player takes one.
-const FREE_TRINKETS := 3
 ## Cells the Alley King walks each turn. It joins the round's usual cats.
 const KING_STEPS := 4
 ## Cells the cheese runs each turn in RUNAWAY CHEESE, and the extra turns that round gets to catch it.

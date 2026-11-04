@@ -25,9 +25,13 @@ const MAX_TARGET_CRUMBS := 9
 ## Score trinkets (Items.Trinket).
 const BUTTER_PAT_POINTS := 2
 const RIDE_TICKET_MULT := 2
-## Score skills (Items.Skill), on the turns they're used.
-const HARD_HEAD_MULT := 1
+## Score skills (Items.Skill), always on. HARD HEAD adds HARD_HEAD_MULT mult a bump at each level.
+## DAREDEVIL and SHOW-OFF multiply the mult by their TIMES at level 1, and GROWTH more each level after.
+const HARD_HEAD_MULT := 2
 const DAREDEVIL_TIMES := 2
+const DAREDEVIL_GROWTH := 1
+const SHOW_OFF_TIMES := 3
+const SHOW_OFF_GROWTH := 1
 ## Card materials (Items.CardMaterial): points a WOOD card and mult a SHINY card add each time it plays.
 const WOOD_POINTS := 2
 const SHINY_MULT := 2
@@ -46,6 +50,18 @@ const COLOR := Color("8fd3ff")
 static func target(round_number: int, boss: bool) -> int:
 	var base := START_TARGET * pow(TARGET_GROWTH, round_number - 1)
 	return roundi(base * (BOSS_TARGET if boss else 1.0))
+
+
+static func hard_head_mult(level: int) -> int:
+	return HARD_HEAD_MULT * maxi(level, 1)
+
+
+static func daredevil_times(level: int) -> int:
+	return DAREDEVIL_TIMES + (maxi(level, 1) - 1) * DAREDEVIL_GROWTH
+
+
+static func show_off_times(level: int) -> int:
+	return SHOW_OFF_TIMES + (maxi(level, 1) - 1) * SHOW_OFF_GROWTH
 
 
 ## Crumbs a won round's score pays: none short of the target.

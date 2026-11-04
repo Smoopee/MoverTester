@@ -1,29 +1,30 @@
 class_name Shop
 extends Control
-## Overlay between rounds where crumbs buy trinkets, skills, consumables, card stamps and card materials.
-## Opens after each won round; Next Round closes it and starts the next one.
+## Overlay between rounds where crumbs buy trinkets, consumables, card stamps and card materials.
+## Opens after each won round (after a boss, once its skill draft is done); Next Round closes it and
+## starts the next one. Skills aren't sold here: they're drafted (SkillDraft).
 
 signal next_round_pressed
 
-enum Kind { TRINKET, SKILL, CONSUMABLE, STAMP, MATERIAL }
+enum Kind { TRINKET, CONSUMABLE, STAMP, MATERIAL }
 
 const OFFERS_PER_ROW := 2
 const OFFER_SIZE := Vector2(170, 112)
-## The sections (trinkets, skills, consumables, card upgrades) are laid out in a grid this many wide.
+## The sections (trinkets, consumables, card upgrades) are laid out in a grid this many wide.
 const SECTION_COLUMNS := 2
 const PICKER_COLUMNS := 6
 const ICON_SIZE := 22
 ## Height of a Buy button on a touchscreen, sized for a finger.
 const TOUCH_BUTTON_HEIGHT := 40
-## The first reroll of the trinkets or skills costs this, and each one after it in the same visit
-## costs this much more. Trinket and skill rerolls share the count.
+## The first reroll of the trinkets costs this, and each one after it in the same visit costs this
+## much more.
 const REROLL_PRICE := 5
 
 
 ## One thing for sale this visit.
 class Offer:
 	var kind: Kind
-	## Items.Trinket, Items.Skill, Items.Consumable, CardSlot.Effect or Items.CardMaterial, depending on kind.
+	## Items.Trinket, Items.Consumable, CardSlot.Effect or Items.CardMaterial, depending on kind.
 	var id: int
 	var price: int
 	var sold := false
@@ -34,11 +35,9 @@ var _run: Run
 var _offers: Array[Offer] = []
 ## The stamp or material offer whose card is being picked, or null.
 var _pending: Offer
-## After a boss: the trinkets on offer are free, and taking one takes the others off the shelf.
-var _free_trinket := false
-## Trinket and skill rerolls bought this visit.
+## Trinket rerolls bought this visit.
 var _rerolls := 0
-## The reroll button of each kind that has one (Kind.TRINKET, Kind.SKILL).
+## The reroll button of each kind that has one (Kind.TRINKET).
 var _reroll_buttons := {}
 
 var _title := Label.new()
@@ -48,7 +47,6 @@ var _trinket_hint := Label.new()
 var _sections := GridContainer.new()
 var _rows := {}
 var _pouch_label := Label.new()
-var _skills_label := Label.new()
 var _picker := VBoxContainer.new()
 var _picker_title := Label.new()
 var _picker_grid := GridContainer.new()
@@ -106,7 +104,6 @@ func _ready() -> void:
 	_sections.add_theme_constant_override("v_separation", 16)
 	vbox.add_child(_sections)
 	_add_section(Kind.TRINKET, "Trinkets", "")
-	_add_section(Kind.SKILL, "Skills", "")
 	_add_section(Kind.CONSUMABLE, "Consumables", "")
 	# Stamps and materials share this row (_row_of).
 	_add_section(Kind.STAMP, "Card upgrades", "A stamp changes how one card moves; a material, what it pays.")
@@ -134,16 +131,13 @@ func _ready() -> void:
 	vbox.add_child(_next_button)
 
 
-## Rolls this visit's offers and shows the shop. With free_trinket (after a boss), the trinket row
-## offers Boss.FREE_TRINKETS trinkets for free, to take one.
-func open(run: Run, free_trinket := false) -> void:
+## Rolls this visit's offers and shows the shop.
+func open(run: Run) -> void:
 	_run = run
 	_offers.clear()
-	_free_trinket = free_trinket
 	_rerolls = 0
-	_trinket_hint.text = "Boss reward: take one for free." if free_trinket else "Yours for the rest of the run."
-	_fill_row(Kind.TRINKET, _picks(Kind.TRINKET, _unowned(Kind.TRINKET)), _row_size(Kind.TRINKET))
-	_fill_row(Kind.SKILL, _picks(Kind.SKILL, _unowned(Kind.SKILL)))
+	_trinket_hint.text = "Yours for the rest of the run."
+	_fill_row(Kind.TRINKET, _picks(Kind.TRINKET, _unowned()))
 	var boss_next := Boss.is_boss_round(run.round_number + 1)
 	_boss_label.visible = boss_next
 	_boss_label.text = "Next round is a boss. %s" % Boss.describe(run.next_boss)
@@ -171,8 +165,6 @@ func _add_section(kind: Kind, title: String, hint: String) -> void:
 	match kind:
 		Kind.TRINKET:
 			hint_label = _trinket_hint
-		Kind.SKILL:
-			hint_label = _skills_label
 		Kind.CONSUMABLE:
 			hint_label = _pouch_label
 		_:
@@ -185,7 +177,7 @@ func _add_section(kind: Kind, title: String, hint: String) -> void:
 	hint_label.modulate = Color(1, 1, 1, 0.6)
 	hint_label.add_theme_font_size_override("font_size", 13)
 	labels.add_child(hint_label)
-	if kind == Kind.TRINKET or kind == Kind.SKILL:
+	if kind == Kind.TRINKET:
 		labels.add_child(_make_reroll_button(kind))
 	section.add_child(labels)
 	var offers := HBoxContainer.new()
@@ -212,7 +204,7 @@ func _fill_row(row_kind: Kind, pool: Array, count := OFFERS_PER_ROW, avoid: Arra
 		var offer := Offer.new()
 		offer.kind = pick.x as Kind
 		offer.id = pick.y
-		offer.price = 0 if offer.kind == Kind.TRINKET and _free_trinket else _info(offer)[2]
+		offer.price = _info(offer)[2]
 		_offers.append(offer)
 		row.add_child(_make_tile(offer))
 	if pool.is_empty():
@@ -232,16 +224,9 @@ static func _row_of(kind: Kind) -> Kind:
 	return Kind.STAMP if kind == Kind.MATERIAL else kind
 
 
-## The trinkets or skills the run doesn't have yet.
-func _unowned(kind: Kind) -> Array:
-	if kind == Kind.TRINKET:
-		return Items.Trinket.values().filter(func(t: int) -> bool: return not _run.has(t))
-	return Items.Skill.values().filter(func(s: int) -> bool: return not _run.has_skill(s))
-
-
-## How many offers the trinket or skill row shows.
-func _row_size(kind: Kind) -> int:
-	return Boss.FREE_TRINKETS if kind == Kind.TRINKET and _free_trinket else OFFERS_PER_ROW
+## The trinkets the run doesn't have yet.
+func _unowned() -> Array:
+	return Items.Trinket.values().filter(func(t: int) -> bool: return not _run.has(t))
 
 
 func _reroll_price() -> int:
@@ -250,7 +235,7 @@ func _reroll_price() -> int:
 
 func _make_reroll_button(kind: Kind) -> Button:
 	var button := Button.new()
-	var color := Items.TRINKET_COLOR if kind == Kind.TRINKET else Items.SKILL_COLOR
+	var color := Items.TRINKET_COLOR
 	button.add_theme_stylebox_override("normal", _button_style(color.darkened(0.45), color))
 	button.add_theme_stylebox_override("hover", _button_style(color.darkened(0.3), color.lightened(0.3)))
 	button.add_theme_stylebox_override("pressed", _button_style(color.darkened(0.6), color))
@@ -263,36 +248,29 @@ func _make_reroll_button(kind: Kind) -> Button:
 		button.custom_minimum_size.y = TOUCH_BUTTON_HEIGHT
 	button.focus_mode = Control.FOCUS_NONE
 	button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
-	button.tooltip_text = "New offers in this row. Each reroll, of trinkets or skills, costs %d more than the last." \
-			% REROLL_PRICE
+	button.tooltip_text = "New offers in this row. Each reroll costs %d more than the last." % REROLL_PRICE
 	button.pressed.connect(_reroll.bind(kind))
 	_reroll_buttons[kind] = button
 	return button
 
 
-## Whether rerolling the kind's row could change anything: there's something left to offer, the
-## skill slots aren't full, and the boss's free trinket hasn't been taken.
-func _can_reroll(kind: Kind) -> bool:
-	if _unowned(kind).is_empty():
-		return false
-	if kind == Kind.SKILL:
-		return _run.skills.size() < Items.SKILL_SLOTS
-	return not (_free_trinket and _offers.any(func(o: Offer) -> bool: return o.kind == Kind.TRINKET and o.sold))
+## Whether rerolling the trinket row could change anything: there's something left to offer.
+func _can_reroll() -> bool:
+	return not _unowned().is_empty()
 
 
 ## Pays for a reroll and rolls new offers for the kind's row.
 func _reroll(kind: Kind) -> void:
 	var price := _reroll_price()
-	if price > _run.crumbs or not _can_reroll(kind):
+	if price > _run.crumbs or not _can_reroll():
 		return
 	_run.crumbs -= price
 	_rerolls += 1
 	Sfx.play(Sfx.Sound.REROLL)
 	var shown: Array = _offers.filter(func(o: Offer) -> bool: return o.kind == kind) \
 			.map(func(o: Offer) -> Vector2i: return Vector2i(o.kind, o.id))
-	_fill_row(kind, _picks(kind, _unowned(kind)), _row_size(kind), shown)
-	BugReport.note("Rerolled the %s for %d (%d crumbs left)" % ["trinkets" if kind == Kind.TRINKET else "skills",
-			price, _run.crumbs])
+	_fill_row(kind, _picks(kind, _unowned()), OFFERS_PER_ROW, shown)
+	BugReport.note("Rerolled the trinkets for %d (%d crumbs left)" % [price, _run.crumbs])
 	refresh()
 
 
@@ -364,8 +342,6 @@ func _info(offer: Offer) -> Array:
 	match offer.kind:
 		Kind.TRINKET:
 			return Items.TRINKETS[offer.id] + [Items.TRINKET_COLOR]
-		Kind.SKILL:
-			return Items.SKILLS[offer.id] + [Items.SKILL_COLOR]
 		Kind.CONSUMABLE:
 			return Items.CONSUMABLES[offer.id] + [Items.CONSUMABLE_COLOR]
 		Kind.MATERIAL:
@@ -379,8 +355,6 @@ func _icon(offer: Offer) -> ItemIcon:
 	match offer.kind:
 		Kind.TRINKET:
 			return ItemIcon.trinket(offer.id, ICON_SIZE)
-		Kind.SKILL:
-			return ItemIcon.skill(offer.id, ICON_SIZE)
 		Kind.CONSUMABLE:
 			return ItemIcon.consumable(offer.id, ICON_SIZE)
 		Kind.MATERIAL:
@@ -397,14 +371,6 @@ func _buy(offer: Offer) -> void:
 			if _run.has(offer.id):
 				return
 			_run.trinkets.append(offer.id)
-			if _free_trinket:
-				for other in _offers:
-					if other.kind == Kind.TRINKET and other != offer:
-						other.sold = true
-		Kind.SKILL:
-			if _run.has_skill(offer.id) or _run.skills.size() >= Items.SKILL_SLOTS:
-				return
-			_run.skills.append(offer.id)
 		Kind.CONSUMABLE:
 			if _run.pouch.size() >= Items.POUCH_SIZE:
 				return
@@ -470,29 +436,24 @@ func close_picker() -> void:
 	refresh()
 
 
-## Updates the crumbs, the pouch and skill counts and the buy buttons. The dev menu calls it after
-## changing the run.
+## Updates the crumbs, the pouch count and the buy buttons. The dev menu calls it after changing the
+## run.
 func refresh() -> void:
 	if _run == null:
 		return
 	_crumbs_label.text = "%d crumbs" % _run.crumbs
 	var pouch_full := _run.pouch.size() >= Items.POUCH_SIZE
-	var skills_full := _run.skills.size() >= Items.SKILL_SLOTS
 	_pouch_label.text = "Used once, then gone. Pouch %d/%d." % [_run.pouch.size(), Items.POUCH_SIZE]
-	_skills_label.text = "Used from their slot, with charges that refill each round. Skills %d/%d." % [_run.skills.size(),
-			Items.SKILL_SLOTS]
 	for offer in _offers:
-		var blocked := offer.kind == Kind.CONSUMABLE and pouch_full or offer.kind == Kind.SKILL and skills_full
-		var owned := not offer.sold and (offer.kind == Kind.TRINKET and _run.has(offer.id)
-				or offer.kind == Kind.SKILL and _run.has_skill(offer.id))
-		var full := "Pouch full" if offer.kind == Kind.CONSUMABLE else "Skills full"
-		var buy := "Take" if offer.price == 0 else "Buy (%d)" % offer.price
-		offer.button.text = "Sold" if offer.sold else ("Owned" if owned else (full if blocked else buy))
+		var blocked := offer.kind == Kind.CONSUMABLE and pouch_full
+		var owned := not offer.sold and offer.kind == Kind.TRINKET and _run.has(offer.id)
+		offer.button.text = "Sold" if offer.sold else ("Owned" if owned else (
+			"Pouch full" if blocked else "Buy (%d)" % offer.price))
 		offer.button.disabled = offer.sold or owned or blocked or offer.price > _run.crumbs
 	for kind: Kind in _reroll_buttons:
 		var button: Button = _reroll_buttons[kind]
 		button.text = "Reroll (%d)" % _reroll_price()
-		button.disabled = _reroll_price() > _run.crumbs or not _can_reroll(kind)
+		button.disabled = _reroll_price() > _run.crumbs or not _can_reroll()
 
 
 func _on_next_round() -> void:
