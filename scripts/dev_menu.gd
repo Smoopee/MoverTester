@@ -69,6 +69,7 @@ var _seed := SpinBox.new()
 var _next_boss := OptionButton.new()
 var _invincible := CheckBox.new()
 var _preview := CheckBox.new()
+var _keep_hand := CheckBox.new()
 ## Items.Trinket -> its CheckBox.
 var _trinket_boxes := {}
 ## Items.Skill -> its CheckBox.
@@ -185,6 +186,7 @@ func _process(_delta: float) -> void:
 		_next_boss.select(run.next_boss)
 	_invincible.set_pressed_no_signal(board.invincible)
 	_preview.set_pressed_no_signal(game.preview_on)
+	_keep_hand.set_pressed_no_signal(game.keep_hand)
 	for trinket: int in _trinket_boxes:
 		(_trinket_boxes[trinket] as CheckBox).set_pressed_no_signal(run.has(trinket))
 	for skill: int in _skill_boxes:
@@ -300,6 +302,13 @@ func _build_run_tab(box: VBoxContainer) -> void:
 		game.set_preview(on)
 		_did("Preview %s" % ("on" if on else "off")))
 	row.add_child(_preview)
+	_keep_hand.text = "Keep hand"
+	_keep_hand.tooltip_text = "Cards left in the hand at Lock In stay for the next turn, which draws only up to the hand size. Off, the whole hand is discarded each turn."
+	_keep_hand.focus_mode = Control.FOCUS_NONE
+	_keep_hand.toggled.connect(func(on: bool) -> void:
+		game.keep_hand = on
+		_did("Keep hand %s (from the next Lock In)" % ("on" if on else "off")))
+	row.add_child(_keep_hand)
 	row = _row(box)
 	_button(row, "Copy game state", func() -> void:
 		DisplayServer.clipboard_set(game._bug_report_state())

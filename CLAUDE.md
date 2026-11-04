@@ -6,6 +6,9 @@ reaches the cheese, within the round's turn limit. Each turn about half the slot
 that changes how the card in that slot plays. Slot effects are where the game's content lives.
 Each round also gives `DISCARDS_PER_ROUND` (5) discards: right-click a card (on a touchscreen, hold it for `Card.HOLD_TIME`), or drag it down onto the
 discard area under the hand (lit while a card is dragged), to swap it for a new draw (`main.gd` `discard_card`).
+The whole hand is discarded at Lock In. The dev menu's **Keep hand** checkbox (`main.gd` `keep_hand`,
+off by default; the sim's `--keep-hand on`) tries keeping the cards left in the hand for the next
+turn (`kept`), which then draws only up to the hand size.
 
 **Touch** (Android playtests): `DisplayServer.is_touchscreen_available()` turns on the hold-to-discard and
 puts Bug and Dev buttons after the trinkets (`main.gd` `_add_touch_button`) in place of F12 and F2.

@@ -11,6 +11,7 @@ extends SceneTree
 ## --trinkets a,b starts every run with those trinkets (butter_pat, ride_ticket, ...), and --skills a,b
 ## with those skills (show_off, daredevil, ...), to see what they do to the score. --materials a,b makes
 ## the starting deck's cards those materials (wood, shiny, gold, copper, paper, stone), taking turns.
+## --keep-hand on keeps the cards not played in the hand for the next turn instead of discarding them (main.gd keep_hand).
 
 const MAX_TURNS := 200
 
@@ -29,6 +30,8 @@ var trinkets: Array[int] = []
 var skills: Array[int] = []
 ## Items.CardMaterial values the starting deck's cards are made of, in turn.
 var materials: Array[int] = []
+## Whether cards left in the hand stay for the next turn (main.gd keep_hand).
+var keep_hand := false
 ## Rounds that had a chest, and chests opened.
 var chest_rounds := 0
 var chests_opened := 0
@@ -81,6 +84,8 @@ func _initialize() -> void:
 				fixed_round = maxi(args[i + 1].to_int(), 1)
 			"--slots":
 				slot_count = clampi(args[i + 1].to_int(), 1, Run.MAX_SLOTS)
+			"--keep-hand":
+				keep_hand = args[i + 1] == "on"
 			"--hand":
 				hand_size = clampi(args[i + 1].to_int(), 1, Run.MAX_HAND_SIZE)
 			"--trinkets":
@@ -125,6 +130,7 @@ func _run() -> void:
 	board.animate = false
 	main.bosses_enabled = false
 	main.force_boss = boss
+	main.keep_hand = keep_hand
 	if boss != -1 or fixed_round > 0 or slot_count > 0 or hand_size > 0 or not trinkets.is_empty() \
 			or not skills.is_empty() or not materials.is_empty():
 		_new_run()
