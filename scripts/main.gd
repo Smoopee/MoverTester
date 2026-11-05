@@ -61,14 +61,16 @@ const BELT_TURN_CHANCE := 0.2
 ## to the cheese. The one that does most is kept.
 const BELT_TRIES := 30
 const BELT_REACH := 2
-## Chance that a belt is a current, laid to make the way to the cheese longer, rather than a highway
-## that saves steps on it.
-const BELT_CURRENT_CHANCE := 0.5
-## A highway is only laid if riding it saves at least BELT_SAVING steps on the way to the cheese, and
-## a current if it makes the way at least BELT_CURRENT_DETOUR steps longer.
-const BELT_SAVING := 3
-const BELT_CURRENT_DETOUR := 2
-## The currents lengthen the way to the cheese by at most this share of the board's side, on top of
+## Chance that a belt is a guard, laid beside crumbs to sweep the mouse away from them, rather than a
+## highway that saves steps on the way to the cheese.
+const BELT_GUARD_CHANCE := 0.4
+## A highway is only laid if riding it saves at least BELT_SAVING steps on the way to the cheese.
+const BELT_SAVING := 4
+## A guard gets BELT_GUARD_CRUMBS crumbs on cells beside it that it makes at least BELT_GUARD_DETOUR
+## steps farther from the mouse's start, so the mouse has to go round it (or jump it) to get them.
+const BELT_GUARD_DETOUR := 4
+const BELT_GUARD_CRUMBS := 2
+## The belts lengthen the way to the cheese by at most this share of the board's side, on top of
 ## everything laid before them.
 const BELT_DETOUR := 0.25
 ## Cells a jump pad throws the mouse.
@@ -221,6 +223,8 @@ var _preview_queued := false
 ## Cells kept clear while laying out a round: the lines crates get pushed along to their plates, and
 ## the cells either side of each locked door and gate.
 var _kept_clear: Array[Vector2i] = []
+## Cells beside this round's guard belts that get their crumbs (see _place_belts, _place_crumbs).
+var _belt_treasure: Array[Vector2i] = []
 ## Each SHORTCUT lock laid this round, with its key's cell or its crate lane (see _crate_lane), until
 ## _drop_idle_shortcuts checks them.
 var _shortcuts: Dictionary[Vector3i, Array] = {}
@@ -2728,9 +2732,11 @@ func _place_hazards(mouse: Vector2i, cheese: Vector2i, traps: Array[Vector2i]) -
 func _place_floor(mouse: Vector2i, cheese: Vector2i, traps: Array[Vector2i]) -> void:
 	var number := run.round_number
 	var bounds := Rect2i(0, 0, board.grid, board.grid)
+	_belt_treasure.clear()
 	var free := func(cell: Vector2i) -> bool:
 		return bounds.has_point(cell) and cell != mouse and cell != cheese and cell not in traps \
-			and not board.has_tile(cell) and not board.has_item(cell) and cell not in _kept_clear
+			and not board.has_tile(cell) and not board.has_item(cell) and cell not in _kept_clear \
+			and cell not in _belt_treasure
 	# On top of any thrown across a chasm (see _place_chasm_pads).
 	var pad_count := board.pads.size() + Difficulty.pads(number)
 	for attempt in 500:
@@ -2787,13 +2793,16 @@ func _place_floor(mouse: Vector2i, cheese: Vector2i, traps: Array[Vector2i]) -> 
 
 
 ## Lays the round's conveyor belts, each one the best of BELT_TRIES runs (see _belt_run): with
-## BELT_CURRENT_CHANCE a current, the one that makes the way to the cheese longest (by at least
-## BELT_CURRENT_DETOUR), else a highway, the one whose ride saves most steps on it (at least
-## BELT_SAVING). A belt that does neither is left out. Belts are one-way (Board.against_belt), so each
-## must leave every cell reachable from the mouse's start and able to get back to it (and so to the
-## cheese, wherever it runs), and the currents together add at most BELT_DETOUR of the board's side
-## to the way. All this goes with the locks open, and a belt must also leave what's reachable with the
-## locks shut as it was, so no key gets shut away. free says which cells a belt can go on.
+## BELT_GUARD_CHANCE a guard, which sweeps the mouse away from crumbs laid beside it, else a highway,
+## the one whose ride saves most steps on the way to the cheese (at least BELT_SAVING), or a guard if no
+## highway saves that much. A guard's crumbs go on the cells beside it that it puts farthest out of the
+## mouse's way (see _guarded), and the guard kept is the one that puts them farthest. A belt that does
+## neither is left out. Belts are one-way
+## (Board.against_belt), so each must leave every cell reachable from the mouse's start and able to get
+## back to it (and so to the cheese, wherever it runs), and together they add at most BELT_DETOUR of
+## the board's side to the way. All this goes with the locks open, and a belt must also leave what's
+## reachable with the locks shut as it was, so no key gets shut away. free says which cells a belt (or
+## a guard's crumb) can go on.
 func _place_belts(mouse: Vector2i, cheese: Vector2i, traps: Array[Vector2i], free: Callable) -> void:
 	var count := Difficulty.belts(run.round_number)
 	if count == 0:
@@ -2803,48 +2812,87 @@ func _place_belts(mouse: Vector2i, cheese: Vector2i, traps: Array[Vector2i], fre
 		+ ceili(board.grid * BELT_DETOUR)
 	var shut := _shut_reach(mouse)
 	for i in count:
-		var current := randf() < BELT_CURRENT_CHANCE
 		var from_mouse := board.distances_from(mouse, false, Board.Belts.FROM, open)
 		var to_cheese := board.distances_from(cheese, false, Board.Belts.TO, open)
 		var way: int = to_cheese[mouse]
-		var best: Dictionary[Vector2i, Card.Dir] = {}
-		var best_score := (BELT_CURRENT_DETOUR if current else BELT_SAVING) - 1
 		# The cells on a shortest way to the cheese, which the belts start near.
 		var route: Array[Vector2i] = []
 		for cell in from_mouse:
 			if from_mouse[cell] + to_cheese.get(cell, way) == way:
 				route.append(cell)
-		var tried := 0
-		for attempt in BELT_TRIES * 20:
-			if tried == BELT_TRIES:
-				break
-			var belt := _belt_run(route, traps, free)
-			if belt.is_empty():
-				continue
-			tried += 1
-			var score := 0
-			if not current:
-				score = _belt_saving(belt, from_mouse, to_cheese, way)
-				if score <= best_score:
+		# A highway that finds no shortcut worth riding makes way for a guard.
+		var kinds: Array[bool] = [false, true]
+		if randf() < BELT_GUARD_CHANCE:
+			kinds = [true]
+		for guard in kinds:
+			var best: Dictionary[Vector2i, Card.Dir] = {}
+			var best_score := 0 if guard else BELT_SAVING - 1
+			var best_treasure: Array[Vector2i] = []
+			# Highways run toward the cheese, guards any way.
+			var aim: Dictionary[Vector2i, int] = {}
+			if not guard:
+				aim = to_cheese
+			var tried := 0
+			for attempt in BELT_TRIES * 20:
+				if tried == BELT_TRIES:
+					break
+				var belt := _belt_run(route, traps, free, aim)
+				if belt.is_empty():
 					continue
-			board.conveyors.merge(belt)
-			var after := board.distances_from(mouse, false, Board.Belts.FROM, open)
-			var back := board.distances_from(mouse, false, Board.Belts.TO, open)
-			var kept := after.size() == from_mouse.size() and back.size() == from_mouse.size() \
-				and after[cheese] <= longest and _shut_reach(mouse) == shut
-			for cell in belt:
-				board.conveyors.erase(cell)
-			if not kept:
+				tried += 1
+				var score := 0
+				if not guard:
+					score = _belt_saving(belt, from_mouse, to_cheese, way)
+					if score <= best_score:
+						continue
+				board.conveyors.merge(belt)
+				var after := board.distances_from(mouse, false, Board.Belts.FROM, open)
+				var back := board.distances_from(mouse, false, Board.Belts.TO, open)
+				var kept := after.size() == from_mouse.size() and back.size() == from_mouse.size() \
+					and after[cheese] <= longest and _shut_reach(mouse) == shut
+				var treasure: Array[Vector2i] = []
+				if kept and guard:
+					treasure = _guarded(belt, from_mouse, after, free)
+					for cell in treasure:
+						score += after[cell] - from_mouse[cell]
+				for cell in belt:
+					board.conveyors.erase(cell)
+				if not kept:
+					continue
+				if score > best_score:
+					best = belt
+					best_score = score
+					best_treasure = treasure
+			if best.is_empty():
 				continue
-			if current:
-				score = after[cheese] - way
-			if score > best_score:
-				best = belt
-				best_score = score
-		if not best.is_empty():
 			board.conveyors.merge(best)
-			BugReport.note("  %s of %d cells, %d steps %s" % ["Current" if current else "Highway", best.size(),
-				best_score, "longer" if current else "saved"])
+			_belt_treasure.append_array(best_treasure)
+			if guard:
+				BugReport.note("  Guard of %d cells, crumbs at %s %d steps farther" % [best.size(), best_treasure,
+					best_score])
+			else:
+				BugReport.note("  Highway of %d cells, %d steps saved" % [best.size(), best_score])
+			break
+
+
+## The cells beside a guard belt that get its crumbs (see _place_belts): up to BELT_GUARD_CRUMBS free
+## cells next to it with no wall between, each one the belt makes at least BELT_GUARD_DETOUR steps
+## farther from the mouse's start, farthest first. before and after are the steps from the mouse's
+## start to each cell without the belt and with it.
+func _guarded(belt: Dictionary[Vector2i, Card.Dir], before: Dictionary[Vector2i, int],
+		after: Dictionary[Vector2i, int], free: Callable) -> Array[Vector2i]:
+	var gains: Dictionary[Vector2i, int] = {}
+	for cell in belt:
+		for offset: Vector2i in Card.OFFSETS.values():
+			var side := cell + offset
+			if not belt.has(side) and free.call(side) and before.has(side) and after.has(side) \
+					and not board.is_barrier(cell, side) and after[side] - before[side] >= BELT_GUARD_DETOUR:
+				gains[side] = after[side] - before[side]
+	var cells: Array[Vector2i] = []
+	cells.assign(gains.keys())
+	cells.sort_custom(func(a: Vector2i, b: Vector2i) -> bool: return gains[a] > gains[b])
+	cells.resize(mini(cells.size(), BELT_GUARD_CRUMBS))
+	return cells
 
 
 ## How many cells the mouse can reach from its start with the locks shut, and how many can get back to
@@ -2857,18 +2905,35 @@ func _shut_reach(mouse: Vector2i) -> Vector2i:
 ## BELT_MIN cells up to BELT_SPAN of the board's side that turns a corner at most once, each cell
 ## running on to the next, on free cells (see _place_floor). It stops short of a cell that isn't free
 ## or a wall across it. The cell past its end, where it drops the mouse, is not a trap, a gap, a chasm,
-## a machine or another belt. Empty if that leaves it shorter than BELT_MIN.
-func _belt_run(near: Array[Vector2i], traps: Array[Vector2i], free: Callable) -> Dictionary[Vector2i, Card.Dir]:
+## a machine or another belt. Empty if that leaves it shorter than BELT_MIN. Given the steps from each
+## cell to the cheese (toward), it runs downhill on them where it can, turning its corner where the way
+## to the cheese does, so a highway follows the way.
+func _belt_run(near: Array[Vector2i], traps: Array[Vector2i], free: Callable,
+		toward: Dictionary[Vector2i, int] = {}) -> Dictionary[Vector2i, Card.Dir]:
 	var belt: Dictionary[Vector2i, Card.Dir] = {}
 	var shift := Vector2i(randi_range(-BELT_REACH, BELT_REACH), 0)
 	shift.y = randi_range(absi(shift.x) - BELT_REACH, BELT_REACH - absi(shift.x))
 	var cell: Vector2i = near.pick_random() + shift
 	var offset: Vector2i = Card.OFFSETS.values().pick_random()
+	var downhill := func(at: Vector2i, step: Vector2i) -> bool:
+		return toward.has(at) and toward.get(at + step, toward[at]) < toward[at] and board._can_cross(at, at + step)
+	if not toward.is_empty():
+		var ways: Array = Card.OFFSETS.values().filter(func(step: Vector2i) -> bool: return downhill.call(cell, step))
+		if not ways.is_empty():
+			offset = ways.pick_random()
 	# Which way the corner turns: a quarter turn one way or the other.
 	var turn: int = [1, -1].pick_random()
 	var turned := false
 	for i in randi_range(BELT_MIN, maxi(roundi(board.grid * BELT_SPAN), BELT_MIN)):
-		if i > 0 and not turned and randf() < BELT_TURN_CHANCE:
+		if i > 0 and not turned and not toward.is_empty():
+			if not downhill.call(cell, offset):
+				for side: int in [turn, -turn]:
+					var bend := Vector2i(-offset.y, offset.x) * side
+					if downhill.call(cell, bend):
+						offset = bend
+						turned = true
+						break
+		elif i > 0 and not turned and randf() < BELT_TURN_CHANCE:
 			offset = Vector2i(-offset.y, offset.x) * turn
 			turned = true
 		if not free.call(cell) or belt.has(cell) or not board._can_cross(cell, cell + offset):
@@ -2901,13 +2966,16 @@ func _belt_saving(belt: Dictionary[Vector2i, Card.Dir], from_mouse: Dictionary[V
 
 
 ## Picks crumb cells off the mouse, the cheese, the traps, the floor tiles (see _place_floor), the
-## keys, plates, crates, chests and crate lanes (see _place_locks) and each other. Nooks behind a bridge
-## (see _nooks) and pockets the walls made (see _pockets) get theirs first, so a dead end always has
-## something in it.
+## keys, plates, crates, chests and crate lanes (see _place_locks) and each other. The cells guard belts
+## sweep the mouse away from (see _place_belts) get theirs first, then nooks behind a bridge (see
+## _nooks) and pockets the walls made (see _pockets), so a dead end always has something in it.
 func _place_crumbs(mouse: Vector2i, cheese: Vector2i, traps: Array[Vector2i]) -> Array[Vector2i]:
 	var crumbs: Array[Vector2i] = []
 	var from_mouse := board.distances_from(mouse, false, Board.Belts.FROM, Board.Locks.OPEN)
-	for cell in _nooks(mouse, cheese).keys() + _pockets(from_mouse, mouse, cheese).keys():
+	var claimed: Array[Vector2i] = _belt_treasure.duplicate()
+	claimed.append_array(_nooks(mouse, cheese).keys())
+	claimed.append_array(_pockets(from_mouse, mouse, cheese).keys())
+	for cell in claimed:
 		if crumbs.size() < CRUMB_COUNT and cell not in crumbs and not board.has_tile(cell) \
 				and not board.has_item(cell) and cell not in _kept_clear:
 			crumbs.append(cell)

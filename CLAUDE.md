@@ -97,10 +97,16 @@ pass over).
   one-way: the mouse can't step or slide onto a belt against it (`Board.against_belt`, a BUMP).
   A belt is a run of 3 up to `BELT_SPAN` of the board's side that turns a corner at most once
   (`main.gd` `_belt_run`), started near the way to the cheese, and kept as the best of `BELT_TRIES`
-  (`_place_belts`): with `BELT_CURRENT_CHANCE` a **current** that makes the way longer (at least
-  `BELT_CURRENT_DETOUR` steps, the currents together at most `BELT_DETOUR` of the side), else a
-  **highway** whose ride saves at least `BELT_SAVING` steps (`_belt_saving`). A belt that does
-  neither is left out, and none leaves a cell the mouse can't get back from. Never placed to push
+  (`_place_belts`), each of two kinds:
+  - **highway** (a movement option): run downhill along the way to the cheese, and laid only if its
+    ride saves at least `BELT_SAVING` steps (`_belt_saving`). A highway that finds none becomes a guard.
+  - **guard** (with `BELT_GUARD_CHANCE`, area denial with a reward): `BELT_GUARD_CRUMBS` crumbs go on
+    the cells beside it that it puts at least `BELT_GUARD_DETOUR` steps farther from the mouse
+    (`_guarded`, `_belt_treasure`, first claim in `_place_crumbs`). Stepping on the belt sweeps the
+    mouse away, so it has to go round the belt's end or jump it to get them.
+
+  A belt that does neither is left out, the belts together add at most `BELT_DETOUR` of the side to
+  the way to the cheese, and none leaves a cell the mouse can't get back from. Never placed to push
   into a wall, off the board or onto a trap.
 
 These chain (`Board._ride`). The pathfinding ignores holes, pads and glue, but takes belts as
