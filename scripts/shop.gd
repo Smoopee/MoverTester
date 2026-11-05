@@ -1,8 +1,8 @@
 class_name Shop
 extends Control
 ## Overlay between rounds where crumbs buy trinkets, consumables, card stamps and card materials.
-## Opens after each won round (after a boss, once its skill draft is done); Next Round closes it and
-## starts the next one. Skills aren't sold here: they're drafted (SkillDraft).
+## Opens after each won round (once its chests' trait drafts and a boss's skill draft are done); Next
+## Round closes it and starts the next one. Skills and traits aren't sold here: they're drafted (Draft).
 
 signal next_round_pressed
 

@@ -72,8 +72,8 @@ var _preview := CheckBox.new()
 var _keep_hand := CheckBox.new()
 ## Items.Trinket -> its CheckBox.
 var _trinket_boxes := {}
-## Items.Skill -> its CheckBox.
-var _skill_boxes := {}
+## Items.Ability -> {Items.Skill or Items.Trait -> its CheckBox}.
+var _ability_boxes := {Items.Ability.SKILL: {}, Items.Ability.TRAIT: {}}
 var _slot_effects: Array[OptionButton] = []
 var _card_dir := OptionButton.new()
 var _card_stamp: OptionButton
@@ -189,8 +189,9 @@ func _process(_delta: float) -> void:
 	_keep_hand.set_pressed_no_signal(game.keep_hand)
 	for trinket: int in _trinket_boxes:
 		(_trinket_boxes[trinket] as CheckBox).set_pressed_no_signal(run.has(trinket))
-	for skill: int in _skill_boxes:
-		(_skill_boxes[skill] as CheckBox).set_pressed_no_signal(run.has_skill(skill))
+	for kind: Items.Ability in _ability_boxes:
+		for id: int in _ability_boxes[kind]:
+			(_ability_boxes[kind][id] as CheckBox).set_pressed_no_signal(run.has_ability(kind, id))
 	for i in _slot_effects.size():
 		_slot_effects[i].get_parent().visible = i < game.slots.size()
 		if i < game.slots.size() and _slot_effects[i].selected != game.slots[i].effect:
@@ -273,10 +274,11 @@ func _build_run_tab(box: VBoxContainer) -> void:
 	_button(row, "-1", _add_bosses_beaten.bind(-1))
 	_button(row, "+1", _add_bosses_beaten.bind(1))
 
-	_heading(box, "Shop and skill draft")
+	_heading(box, "Shop and drafts")
 	row = _row(box)
 	_button(row, "Open shop", _open_shop)
 	_button(row, "Draft a skill", _open_draft)
+	_button(row, "Draft a trait (chest)", _open_trait_draft)
 
 	_heading(box, "Cheats")
 	row = _row(box)
@@ -360,24 +362,26 @@ func _build_items_tab(box: VBoxContainer) -> void:
 		box.add_child(check)
 		_trinket_boxes[trinket] = check
 
-	_heading(box, "Skills (up to %d)" % Items.SKILL_SLOTS)
-	for skill: Items.Skill in Items.Skill.values():
-		var skill_row := _row(box)
-		var check := CheckBox.new()
-		check.text = Items.skill_name(skill)
-		check.icon = ItemIcon.skill(skill)
-		check.tooltip_text = "%s\n%s" % [Items.skill_text(skill, 1), Items.skill_use_text(skill, 1)]
-		check.focus_mode = Control.FOCUS_NONE
-		check.add_theme_color_override("font_color", Items.SKILL_COLOR)
-		check.toggled.connect(_set_skill.bind(skill))
-		skill_row.add_child(check)
-		_skill_boxes[skill] = check
-		if Items.skill_max_level(skill) > 1:
-			_button(skill_row, "Lv -", _level_skill.bind(skill, -1))
-			_button(skill_row, "Lv +", _level_skill.bind(skill, 1))
-	_button(_row(box), "Refill skill charges", func() -> void:
+	for kind: Items.Ability in [Items.Ability.SKILL, Items.Ability.TRAIT]:
+		var word := Items.kind_word(kind).capitalize()
+		_heading(box, "%ss (up to %d)" % [word, Items.slots(kind)])
+		for id: int in Items.all(kind):
+			var ability_row := _row(box)
+			var check := CheckBox.new()
+			check.text = Items.ability_name(kind, id)
+			check.icon = ItemIcon.ability(kind, id)
+			check.tooltip_text = "%s\n%s" % [Items.text(kind, id, 1), Items.use_text(kind, id, 1)]
+			check.focus_mode = Control.FOCUS_NONE
+			check.add_theme_color_override("font_color", Items.color(kind))
+			check.toggled.connect(_set_ability.bind(kind, id))
+			ability_row.add_child(check)
+			_ability_boxes[kind][id] = check
+			if Items.max_level(kind, id) > 1:
+				_button(ability_row, "Lv -", _level_ability.bind(kind, id, -1))
+				_button(ability_row, "Lv +", _level_ability.bind(kind, id, 1))
+	_button(_row(box), "Refill skill and trait charges", func() -> void:
 		game.refill_skill_charges()
-		_did("Refilled the skill charges"))
+		_did("Refilled the skill and trait charges"))
 
 	_heading(box, "Consumables")
 	row = _row(box)
@@ -745,7 +749,7 @@ func _add_bosses_beaten(by: int) -> void:
 func _open_shop() -> void:
 	if _idle():
 		game.win_panel.hide()
-		game.skill_draft.hide()
+		game.draft.hide()
 		game.shop.open(game.run)
 		_did("Opened the shop")
 
@@ -754,13 +758,27 @@ func _open_shop() -> void:
 func _open_draft() -> void:
 	if not _idle():
 		return
-	if game.run.draft_pool().is_empty():
+	if game.run.draft_pool(Items.Ability.SKILL).is_empty():
 		_say("Nothing left to draft: the skill slots are full and every skill is at its top level.")
 		return
 	game.win_panel.hide()
 	game.shop.hide()
 	game._open_draft(false)
 	_did("Opened a skill draft")
+
+
+## Opens a chest's trait draft over whatever is up, as if the mouse had opened a chest: picking closes it.
+func _open_trait_draft() -> void:
+	if not _idle():
+		return
+	if game.run.draft_pool(Items.Ability.TRAIT).is_empty():
+		_say("Nothing left to draft: the trait slots are full and every trait is at its top level.")
+		return
+	game.win_panel.hide()
+	game.shop.hide()
+	game.chests_to_open = 1
+	game._open_chest_draft()
+	_did("Opened a trait draft")
 
 
 func _set_speed(index: int) -> void:
@@ -799,28 +817,29 @@ func _set_trinket(on: bool, trinket: Items.Trinket) -> void:
 	_did("%s %s" % ["Added" if on else "Removed", Items.TRINKETS[trinket][0]])
 
 
-func _set_skill(on: bool, skill: Items.Skill) -> void:
-	if on and not game.run.has_skill(skill):
-		if game.run.skills.size() >= Items.SKILL_SLOTS:
-			_say("The skill slots are full.")
+func _set_ability(on: bool, kind: Items.Ability, id: int) -> void:
+	if on and not game.run.has_ability(kind, id):
+		if game.run.owned(kind).size() >= Items.slots(kind):
+			_say("The %s slots are full." % Items.kind_word(kind).to_lower())
+			_ability_boxes[kind][id].set_pressed_no_signal(false)
 			return
-		game.run.add_skill(skill)
+		game.run.add(kind, id)
 	elif not on:
-		game.run.remove_skill(skill)
+		game.run.remove(kind, id)
 	game.refresh_ui()
-	_did("%s %s" % ["Added" if on else "Removed", Items.skill_name(skill)])
+	_did("%s %s" % ["Added" if on else "Removed", Items.ability_name(kind, id)])
 
 
-## Moves an owned skill's level by step, between 1 and its top level, with full charges at the new one.
-func _level_skill(skill: Items.Skill, step: int) -> void:
-	if not game.run.has_skill(skill):
-		_say("The run doesn't have %s." % Items.skill_name(skill))
+## Moves an owned skill's or trait's level by step, between 1 and its top level, with full charges at
+## the new one.
+func _level_ability(kind: Items.Ability, id: int, step: int) -> void:
+	if not game.run.has_ability(kind, id):
+		_say("The run doesn't have %s." % Items.ability_name(kind, id))
 		return
-	var level := clampi(game.run.skill_level(skill) + step, 1, Items.skill_max_level(skill))
-	game.run.skill_levels[skill] = level
-	game.skill_charges.erase(skill)
-	game.refresh_ui()
-	_did("%s is level %d" % [Items.skill_name(skill), level])
+	var level := clampi(game.run.level(kind, id) + step, 1, Items.max_level(kind, id))
+	game.run.set_level(kind, id, level)
+	game.refill_skill_charges()
+	_did("%s is level %d" % [Items.ability_name(kind, id), level])
 
 
 func _set_slot_effect(index: int, slot: int) -> void:

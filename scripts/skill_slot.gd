@@ -1,25 +1,28 @@
 class_name SkillSlot
 extends BaseButton
-## One of the Items.SKILL_SLOTS skill slots above the card slots: a squarer card showing an owned
-## skill's symbol, name and level, or an empty outline. An ACTIVE skill shows the charges it has left
-## this round, and pressing it uses the skill for this turn (main.gd use_skill), which lights it up
-## until the turn's cards have played. An AUTO skill (NINE LIVES) shows its charges too, but spends
-## them by itself; a PASSIVE one is always on. Hovering it shows what the skill does.
+## One of the slots above the card slots: Items.SKILL_SLOTS for skills on the left, Items.TRAIT_SLOTS
+## for traits on the right (main.gd _refresh_skills). A squarer card showing an owned skill's or trait's
+## symbol, name and level, or an empty outline. A skill shows the charges it has left this round, and
+## pressing it uses the skill for this turn (main.gd use_skill), which lights it up until the turn's
+## cards have played. A trait with charges (NINE LIVES) shows them too, but spends them by itself; the
+## rest are always on. Hovering it shows what it does.
 
-const SIZE := Vector2(84, 88)
-const ICON_SIZE := 40
+const SIZE := Vector2(70, 80)
+const ICON_SIZE := 34
 const FLASH_TIME := 0.6
 ## The pips that show charges.
-const PIP_RADIUS := 3.5
-const PIP_GAP := 10.0
+const PIP_RADIUS := 3.0
+const PIP_GAP := 9.0
 ## The name's font size, which shrinks to fit a long name.
-const NAME_SIZE := 13
-const NAME_MIN_SIZE := 9
+const NAME_SIZE := 12
+const NAME_MIN_SIZE := 8
 
-## The Items.Skill shown, or -1 for an empty slot. Set it, level, charges and active before adding
-## the node to the tree.
-var skill := -1
-## The skill's level, from 1.
+## Whether the slot holds a skill or a trait. Set it, id, level, charges and active before adding the
+## node to the tree.
+var kind := Items.Ability.SKILL
+## The Items.Skill or Items.Trait shown, or -1 for an empty slot.
+var id := -1
+## Its level, from 1.
 var level := 1
 ## Charges left this round.
 var charges := 0
@@ -42,11 +45,11 @@ func _ready() -> void:
 	custom_minimum_size = SIZE
 	focus_mode = Control.FOCUS_NONE
 	_filled.bg_color = Color("f4ecd8")
-	_filled.border_color = Items.SKILL_COLOR
+	_filled.border_color = _color()
 	_filled.set_border_width_all(3)
 	_filled.set_corner_radius_all(10)
 	_empty.bg_color = Color(0, 0, 0, 0.2)
-	_empty.border_color = Color(1, 1, 1, 0.18)
+	_empty.border_color = Color(_color(), 0.22)
 	_empty.set_border_width_all(2)
 	_empty.set_corner_radius_all(10)
 	_glow.set_corner_radius_all(10)
@@ -57,33 +60,33 @@ func _ready() -> void:
 	_on.set_expand_margin_all(3)
 	mouse_entered.connect(queue_redraw)
 	mouse_exited.connect(queue_redraw)
-	if skill != -1:
-		_icon = ItemIcon.skill(skill, ICON_SIZE)
-		tooltip_text = "%s\n\n%s" % [Items.skill_text(skill, level), _use_note()]
-		disabled = not _clickable() or active or charges <= 0
+	if id != -1:
+		_icon = ItemIcon.ability(kind, id, ICON_SIZE)
+		tooltip_text = "%s\n\n%s" % [Items.text(kind, id, level), _use_note()]
+		disabled = kind != Items.Ability.SKILL or active or charges <= 0
 		mouse_default_cursor_shape = Control.CURSOR_ARROW if disabled else Control.CURSOR_POINTING_HAND
 	else:
 		disabled = true
-		tooltip_text = "An empty skill slot. You pick a skill at the start of a run and after each boss."
+		tooltip_text = "An empty skill slot. You pick a skill at the start of a run and after each boss." \
+			if kind == Items.Ability.SKILL else "An empty trait slot. Each chest the mouse opens offers a trait."
 
 
-func _clickable() -> bool:
-	return Items.skill_use(skill) == Items.SkillUse.ACTIVE
+func _color() -> Color:
+	return Items.color(kind)
 
 
 func _total() -> int:
-	return Items.skill_charges(skill, level)
+	return Items.charges(kind, id, level)
 
 
 func _use_note() -> String:
 	var total := _total()
-	var max_level := Items.skill_max_level(skill)
+	var max_level := Items.max_level(kind, id)
 	var level_note := " Level %d of %d." % [level, max_level] if max_level > 1 else ""
-	match Items.skill_use(skill):
-		Items.SkillUse.PASSIVE:
-			return "Always on.%s" % level_note
-		Items.SkillUse.AUTO:
+	if kind == Items.Ability.TRAIT:
+		if total > 0:
 			return "Works by itself: %d of %d left this round.%s" % [charges, total, level_note]
+		return "Always on.%s" % level_note
 	if active:
 		return "On this turn.%s" % level_note
 	if charges <= 0:
@@ -92,24 +95,24 @@ func _use_note() -> String:
 		"" if total == 1 else "s", level_note]
 
 
-## Lights the slot up briefly, when its skill does something.
+## Lights the slot up briefly, when its skill or trait does something.
 func flash() -> void:
 	create_tween().tween_property(self, "_flash", 0.0, FLASH_TIME).from(1.0)
 
 
 func _make_custom_tooltip(_for_text: String) -> Object:
-	if skill == -1:
-		return CardSlot.make_tooltip("EMPTY", Color(1, 1, 1, 0.6), tooltip_text, "SKILL")
-	return CardSlot.make_tooltip(Items.skill_title(skill, level), Items.SKILL_COLOR, tooltip_text, "SKILL")
+	if id == -1:
+		return CardSlot.make_tooltip("EMPTY", Color(1, 1, 1, 0.6), tooltip_text, Items.kind_word(kind))
+	return CardSlot.make_tooltip(Items.title(kind, id, level), _color(), tooltip_text, Items.kind_word(kind))
 
 
 func _draw() -> void:
 	var font := get_theme_default_font()
 	var rect := Rect2(Vector2.ZERO, size)
-	if skill == -1:
+	if id == -1:
 		draw_style_box(_empty, rect)
-		draw_string(font, Vector2(0, size.y / 2 + 5), "SKILL", HORIZONTAL_ALIGNMENT_CENTER, size.x, 13,
-				Color(1, 1, 1, 0.2))
+		draw_string(font, Vector2(0, size.y / 2 + 4), Items.kind_word(kind), HORIZONTAL_ALIGNMENT_CENTER, size.x,
+				11, Color(_color(), 0.3))
 		return
 	var total := _total()
 	# Spent for the round, it fades; on this turn, it glows with a bright rim.
@@ -122,27 +125,27 @@ func _draw() -> void:
 		var glow := maxf(_flash, 0.5 if active else 0.0)
 		if is_hovered() and not disabled:
 			glow = maxf(glow, 0.2)
-		_glow.bg_color = Color(Items.SKILL_COLOR, 0.4 * glow)
+		_glow.bg_color = Color(_color(), 0.4 * glow)
 		draw_style_box(_glow, rect)
-	draw_texture(_icon, Vector2((size.x - ICON_SIZE) / 2, 7), fade)
-	var ink := Items.SKILL_COLOR.darkened(0.25) * fade
+	draw_texture(_icon, Vector2((size.x - ICON_SIZE) / 2, 6), fade)
+	var ink := _color().darkened(0.3) * fade
 	# The level, as a numeral in the top right corner.
 	if level > 1:
-		draw_string(font, Vector2(size.x - 24, 17), Items.ROMAN[mini(level, Items.ROMAN.size() - 1)],
-				HORIZONTAL_ALIGNMENT_RIGHT, 18, 12, ink)
-	var title: String = Items.skill_name(skill)
+		draw_string(font, Vector2(size.x - 22, 15), Items.ROMAN[mini(level, Items.ROMAN.size() - 1)],
+				HORIZONTAL_ALIGNMENT_RIGHT, 16, 11, ink)
+	var title: String = Items.ability_name(kind, id)
 	var font_size := NAME_SIZE
-	while font_size > NAME_MIN_SIZE and font.get_string_size(title, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x > size.x - 8:
+	while font_size > NAME_MIN_SIZE and font.get_string_size(title, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x > size.x - 6:
 		font_size -= 1
-	draw_string(font, Vector2(0, size.y - 22), title, HORIZONTAL_ALIGNMENT_CENTER, size.x, font_size, ink)
+	draw_string(font, Vector2(0, size.y - 20), title, HORIZONTAL_ALIGNMENT_CENTER, size.x, font_size, ink)
 	if total == 0:
-		draw_string(font, Vector2(0, size.y - 7), "ALWAYS ON", HORIZONTAL_ALIGNMENT_CENTER, size.x, 9, ink)
+		draw_string(font, Vector2(0, size.y - 7), "ALWAYS ON", HORIZONTAL_ALIGNMENT_CENTER, size.x, 8, ink)
 		return
 	# One pip a charge, filled while it's left.
 	var left := size.x / 2 - (total - 1) * PIP_GAP / 2
 	for i in total:
-		var at := Vector2(left + i * PIP_GAP, size.y - 11)
+		var at := Vector2(left + i * PIP_GAP, size.y - 10)
 		if i < charges:
-			draw_circle(at, PIP_RADIUS, Items.SKILL_COLOR)
+			draw_circle(at, PIP_RADIUS, _color())
 		else:
-			draw_circle(at, PIP_RADIUS, Items.SKILL_COLOR.darkened(0.25), false, 1.2, true)
+			draw_circle(at, PIP_RADIUS, _color().darkened(0.25), false, 1.2, true)

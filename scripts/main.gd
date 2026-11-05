@@ -2,8 +2,9 @@ class_name Main
 extends Control
 ## Game controller: runs a run of rounds, deals hands, handles card placement, and plays locked-in turns.
 
-## Chance that a round has a chest. Opening it pays CHEST_CRUMBS.
-const CHEST_CHANCE := 0.4
+## Every round has a chest, and a second with SECOND_CHEST_CHANCE. Opening one drafts a trait (see
+## _open_chest), or pays CHEST_CRUMBS once the trait slots are full and every trait at its top level.
+const SECOND_CHEST_CHANCE := 0.3
 ## The chest is at least this many cells from the mouse.
 const CHEST_MIN_DISTANCE := 4
 const CHEST_CRUMBS := 12
@@ -11,6 +12,8 @@ const CHEST_CRUMBS := 12
 const ROW_WIDTH := 560.0
 const HAND_WIDTH := 480.0
 const SLOT_GAP := 8
+## Room between the skill slots and the trait slots, in the row above the card slots.
+const ABILITY_GROUP_GAP := 14
 ## The cheese starts at least this many cells from the mouse, or the board's size less 2 if that's smaller.
 const MIN_CHEESE_DISTANCE := 8
 ## Crumbs scattered on the board each round, worth 1 each.
@@ -150,7 +153,7 @@ const FIZZLED := Color(1, 0.5, 0.5, 0.6)
 var run := Run.new()
 var pile_viewer := PileViewer.new()
 var shop := Shop.new()
-var skill_draft := SkillDraft.new()
+var draft := Draft.new()
 ## Shown under the win panel's button once the run is won, to start over instead of going on.
 var new_run_button := Button.new()
 var slots: Array[CardSlot] = []
@@ -187,19 +190,29 @@ var _pending_points: Dictionary[Vector2i, int] = {}
 var chest_rewards := PackedStringArray()
 ## Shown in place of the hint at the start of the next turn, after a chest is opened.
 var chest_note := ""
+## Chests opened whose trait draft hasn't been taken yet. Opened during a turn's cards, a chest's
+## draft waits for the turn to end: it opens at the start of the next turn, or after the win panel.
+var chests_to_open := 0
 ## Traps THICK FUR has broken this turn.
 var traps_broken := 0
 ## Charges each of the run's skills has left this round (Items.Skill -> count), refilled from
-## Items.skill_charges at the start of every round. PASSIVE skills have none.
+## Items.charges at the start of every round, and the same for traits that have them (NINE LIVES).
 var skill_charges: Dictionary[int, int] = {}
-## ACTIVE skills used this turn, on until the turn's cards have played (use_skill).
+var trait_charges: Dictionary[int, int] = {}
+## Skills used this turn, on until the turn's cards have played (use_skill).
 var active_skills: Array[int] = []
 ## Where the mouse was when this turn's cards started to play, for NINE LIVES.
 var turn_start_cell := Vector2i.ZERO
 ## Set when NINE LIVES saved the mouse during this turn's cards: the rest of them don't play.
 var escaped := false
-## Whether the skill draft that's open is a boss's reward, which leads on to the shop.
-var _draft_after_boss := false
+## Set once the won round's win panel is closed: what's left of it (chests' trait drafts, a boss's
+## skill draft) leads on to the shop (_continue_after_round).
+var _after_round := false
+## Set once this round's boss has offered its skill draft.
+var _boss_drafted := false
+## The skill and trait slots above the card slots (_refresh_skills).
+var _skill_slots: Array[SkillSlot] = []
+var _trait_slots: Array[SkillSlot] = []
 ## Cards played from RECYCLE slots, returned to the next hand.
 var recycled: Array[CardData] = []
 ## Set from the F2 dev menu: the cards left in the hand at Lock In stay in it for the next turn,
@@ -308,8 +321,8 @@ func _ready() -> void:
 	add_child(pile_viewer)
 	shop.next_round_pressed.connect(new_round)
 	add_child(shop)
-	skill_draft.picked.connect(_on_skill_picked)
-	add_child(skill_draft)
+	draft.picked.connect(_on_draft_picked)
+	add_child(draft)
 	var bug_report := BugReport.new()
 	bug_report.get_state = _bug_report_state
 	add_child(bug_report)
@@ -352,24 +365,66 @@ func new_run() -> void:
 ## Opens a skill draft: the run's first skill, or a boss's reward (after_boss). Returns false, opening
 ## nothing, when there's nothing left to offer.
 func _open_draft(after_boss: bool) -> bool:
-	_draft_after_boss = after_boss
 	var title := "Boss reward: pick a skill" if after_boss else "Pick your first skill"
-	var subtitle := "Yours for the whole run. You'll pick another after each boss."
+	var subtitle := "Yours for the whole run, used when you choose. You'll pick another after each boss."
 	if after_boss:
 		subtitle = "A new skill, or the next level of one you have." if run.skills.size() < Items.SKILL_SLOTS \
 			else "Your skill slots are full: pick one to level up."
-	var opened := skill_draft.open(run, SkillDraft.roll(run), title, subtitle)
+	var opened := draft.open(run, Items.Ability.SKILL, Draft.roll(run, Items.Ability.SKILL), title, subtitle)
 	if opened:
 		refresh_preview()
 	return opened
 
 
-## A skill was drafted: it starts with full charges, and a boss's reward goes on to the shop.
-func _on_skill_picked(skill: Items.Skill) -> void:
-	skill_charges.erase(skill)
-	if _draft_after_boss:
-		shop.open(run)
+## Opens the trait draft of the next chest opened (chests_to_open). Once the trait slots are full and
+## every trait is at its top level, a chest pays CHEST_CRUMBS instead. Returns false, opening nothing,
+## when there's no draft to open.
+func _open_chest_draft() -> bool:
+	if chests_to_open <= 0:
+		return false
+	if run.draft_pool(Items.Ability.TRAIT).is_empty():
+		for i in chests_to_open:
+			_pay_chest_crumbs()
+		chests_to_open = 0
+		_refresh_hud()
+		return false
+	var subtitle := "A new trait, or the next level of one you have. Traits are always at work." \
+		if run.traits.size() < Items.TRAIT_SLOTS else "Your trait slots are full: pick one to level up."
+	if chests_to_open > 1:
+		subtitle += " (%d more chest%s after this.)" % [chests_to_open - 1, "" if chests_to_open == 2 else "s"]
+	var opened := draft.open(run, Items.Ability.TRAIT, Draft.roll(run, Items.Ability.TRAIT), "Chest! Pick a trait",
+		subtitle)
+	if opened:
+		refresh_preview()
+	return opened
+
+
+## A skill or trait was drafted: it starts with full charges. A chest's draft opens the next chest's,
+## and after the round, the drafts lead on to the shop.
+func _on_draft_picked(kind: Items.Ability, id: int) -> void:
+	if kind == Items.Ability.SKILL:
+		skill_charges.erase(id)
+	else:
+		trait_charges.erase(id)
+		chests_to_open = maxi(chests_to_open - 1, 0)
+		chest_rewards.append(Items.title(kind, id, run.level(kind, id)))
 	refresh_ui()
+	if _after_round:
+		_continue_after_round()
+	elif kind == Items.Ability.TRAIT:
+		_open_chest_draft()
+
+
+## After a won round's win panel: the trait drafts of chests opened on its last turn, then a boss's
+## skill draft, then the shop.
+func _continue_after_round() -> void:
+	if _open_chest_draft():
+		return
+	if run.boss != -1 and not _boss_drafted:
+		_boss_drafted = true
+		if _open_draft(true):
+			return
+	shop.open(run)
 
 
 func new_round() -> void:
@@ -396,13 +451,14 @@ func new_round() -> void:
 	var traps := _place_traps(mouse, cheese)
 	var walls := _place_walls(mouse, cheese, traps)
 	var chasms := _place_chasms(mouse, cheese, traps)
-	# A chest goes behind a bridge or in a pocket of wall, once the round has walls. Laid now, so the
-	# rest keeps off it.
-	var chest := randf() < CHEST_CHANCE
-	if chest and Difficulty.walls(run.round_number) > 0:
-		var pocket := _place_pocket(mouse, cheese, traps)
-		if pocket != NO_CELL:
-			board.chests.append(pocket)
+	# Chests go behind a bridge or in a pocket of wall, once the round has walls. Laid now, so the rest
+	# keeps off them.
+	var chest_count := 2 if randf() < SECOND_CHEST_CHANCE else 1
+	if Difficulty.walls(run.round_number) > 0:
+		for i in chest_count:
+			var pocket := _place_pocket(mouse, cheese, traps)
+			if pocket != NO_CELL:
+				board.chests.append(pocket)
 	_place_chasm_pads(chasms, mouse, cheese)
 	_place_locks(mouse, cheese, traps)
 	_place_hazards(mouse, cheese, traps)
@@ -411,8 +467,12 @@ func new_round() -> void:
 	var crumbs := _place_crumbs(mouse, cheese, traps)
 	var cats := _place_cats(mouse, cheese, traps)
 	board.place(mouse, cheese, traps, crumbs, cats, run.boss == Boss.Kind.ALLEY_KING, walls)
-	if chest and board.chests.is_empty():
-		board.chests = _place_chest(mouse, cheese, traps, crumbs)
+	# Out in the open, with no walls or no pocket to put them in.
+	while board.chests.size() < chest_count:
+		var cell := _place_chest(mouse, cheese, traps, crumbs)
+		if cell == NO_CELL:
+			break
+		board.chests.append(cell)
 	turn_limit = _turn_limit(_path_distance(mouse, cheese))
 	BugReport.note("Round %d%s: %dx%d board, %d turns, mouse %s, cheese %s, traps %s, crumbs %s, chests %s" % [
 		run.round_number, " (boss %s)" % Boss.INFO[run.boss][0] if run.boss != -1 else "", board.grid,
@@ -440,12 +500,16 @@ func new_round() -> void:
 	last_turn_score = ""
 	chest_rewards.clear()
 	chest_note = ""
+	chests_to_open = 0
+	_after_round = false
+	_boss_drafted = false
 	_end_skills()
 	skill_charges.clear()
+	trait_charges.clear()
 	win_panel.hide()
 	pile_viewer.hide()
 	shop.hide()
-	skill_draft.hide()
+	draft.hide()
 	_refresh_trinkets()
 	_refresh_skills()
 	Music.play(Music.Song.BOSS if run.boss != -1 else Music.Song.BOARD)
@@ -484,13 +548,15 @@ func start_turn() -> void:
 	_refresh_hud()
 	_refresh_pouch()
 	refresh_preview()
+	# Chests opened during the last turn's cards draft their traits now, over the new hand.
+	_open_chest_draft()
 
 
 ## Plays the slotted cards in order, then discards them and deals the next hand. With keep_hand, the
 ## cards left in the hand stay in it; without, they're discarded too.
 func lock_in() -> void:
-	# Lock In can still be reached with Tab under the win panel, the shop and the skill draft.
-	if busy or win_panel.visible or shop.visible or skill_draft.visible:
+	# Lock In can still be reached with Tab under the win panel, the shop and a draft.
+	if busy or win_panel.visible or shop.visible or draft.visible:
 		return
 	busy = true
 	Sfx.play(Sfx.Sound.LOCK_IN)
@@ -657,17 +723,17 @@ func _round_over() -> bool:
 	return board.mouse_cell == board.cheese_cell or board.is_caught()
 
 
-## Whether the preview is drawn: the dev menu's preview_on, or the KEEN WHISKERS skill.
+## Whether the preview is drawn: the dev menu's preview_on, or the KEEN WHISKERS trait.
 func _previewing() -> bool:
-	return preview_on or run.has_skill(Items.Skill.KEEN_WHISKERS)
+	return preview_on or run.has_trait(Items.Trait.KEEN_WHISKERS)
 
 
 ## How many of the cards left in the hand at Lock In stay for the next turn, the leftmost first: all of
-## them with the dev menu's keep_hand, Items.PACK_RAT_CARDS with the PACK RAT skill, else none.
+## them with the dev menu's keep_hand, Items.PACK_RAT_CARDS with the PACK RAT trait, else none.
 func _cards_kept() -> int:
 	if keep_hand:
 		return Run.MAX_HAND_SIZE
-	return Items.PACK_RAT_CARDS if run.has_skill(Items.Skill.PACK_RAT) else 0
+	return Items.PACK_RAT_CARDS if run.has_trait(Items.Trait.PACK_RAT) else 0
 
 
 ## Shows or hides the preview to match _previewing, at the end of the frame, once however many times
@@ -684,7 +750,7 @@ func refresh_preview() -> void:
 ## it, so a catch shows.
 func _update_preview() -> void:
 	_preview_queued = false
-	if not _previewing() or busy or win_panel.visible or shop.visible or skill_draft.visible:
+	if not _previewing() or busy or win_panel.visible or shop.visible or draft.visible:
 		board.show_preview([], Board.PreviewEnd.MOVED)
 		return
 	var real := board
@@ -782,6 +848,9 @@ func _end_round() -> void:
 			lines.append("Gold cards  +%d" % gold_crumbs)
 		for chest in chest_rewards:
 			lines.append("Chest  %s" % chest)
+		var chest_drafts := chests_to_open if not run.draft_pool(Items.Ability.TRAIT).is_empty() else 0
+		if chest_drafts > 0:
+			lines.append("Chest%s  pick a trait next" % (" x%d" % chest_drafts if chest_drafts > 1 else ""))
 		run.crumbs += earned
 		lines.append("You have %d crumbs." % run.crumbs)
 		BugReport.note("Found the cheese on turn %d, score %d / %d, earned %d (+%d picked up), %d crumbs" % [
@@ -791,7 +860,7 @@ func _end_round() -> void:
 			run.bosses_beaten += 1
 			win_label.text = "You beat %s in %d turn%s!" % [Boss.INFO[run.boss][0], turn, "" if turn == 1 else "s"]
 			lines.append_array(_boss_upgrade())
-			if not run.draft_pool().is_empty():
+			if not run.draft_pool(Items.Ability.SKILL).is_empty():
 				lines.append("Pick a skill next.")
 		if won_run():
 			BugReport.note("Won the run on round %d" % run.round_number)
@@ -801,8 +870,13 @@ func _end_round() -> void:
 		lines.append("Next round: %s, score target %d." % [Difficulty.describe(next),
 			Score.target(next, bosses_enabled and Boss.is_boss_round(next))])
 		win_details.text = "\n".join(lines)
-		win_panel_button.text = "Endless" if won_run() else (
-			"Pick a Skill" if run.boss != -1 and not run.draft_pool().is_empty() else "Shop")
+		win_panel_button.text = "Shop"
+		if won_run():
+			win_panel_button.text = "Endless"
+		elif chest_drafts > 0:
+			win_panel_button.text = "Open the Chest" if chest_drafts == 1 else "Open the Chests"
+		elif run.boss != -1 and not run.draft_pool(Items.Ability.SKILL).is_empty():
+			win_panel_button.text = "Pick a Skill"
 	new_run_button.visible = won_run()
 	status_label.text = ""
 	win_panel.show()
@@ -820,9 +894,10 @@ func _on_win_panel_button() -> void:
 			run.endless = true
 			BugReport.note("Going on in endless mode")
 		win_panel.hide()
-		# A boss's reward is a skill draft, which goes on to the shop once a skill is picked.
-		if run.boss == -1 or not _open_draft(true):
-			shop.open(run)
+		# Chests opened on the last turn draft their traits, then a boss's reward drafts a skill, and
+		# then the shop opens.
+		_after_round = true
+		_continue_after_round()
 
 
 ## True when the round ended the run: the mouse was caught, the turns ran out, or it reached the
@@ -860,11 +935,11 @@ func _on_mouse_moved(motion: Board.Motion, cells: int) -> void:
 				turn_mult += Score.RIDE_TICKET_MULT
 				_pop_mult("+%d mult" % Score.RIDE_TICKET_MULT)
 		Board.Motion.BUMP:
-			if run.has_skill(Items.Skill.HARD_HEAD):
-				var mult := Score.hard_head_mult(run.skill_level(Items.Skill.HARD_HEAD))
+			if run.has_trait(Items.Trait.HARD_HEAD):
+				var mult := Score.hard_head_mult(run.trait_level(Items.Trait.HARD_HEAD))
 				turn_mult += mult
 				_pop_mult("+%d mult" % mult)
-				_flash_skill(Items.Skill.HARD_HEAD)
+				_flash_trait(Items.Trait.HARD_HEAD)
 	_refresh_hud()
 
 
@@ -912,22 +987,22 @@ func _pay_stones() -> void:
 ## Adds the mult that goes by how the cards played: DAREDEVIL when they left the mouse next to a trap,
 ## a cat or a cat's path, and SHOW-OFF when every slot that isn't blocked held a card.
 func _score_cards() -> void:
-	if run.has_skill(Items.Skill.DAREDEVIL) and not _round_over():
-		var times := Score.daredevil_times(run.skill_level(Items.Skill.DAREDEVIL))
+	if run.has_trait(Items.Trait.DAREDEVIL) and not _round_over():
+		var times := Score.daredevil_times(run.trait_level(Items.Trait.DAREDEVIL))
 		for offset: Vector2i in Card.OFFSETS.values():
 			if board.is_deadly(board.mouse_cell + offset):
 				turn_mult *= times
 				_pop_mult("×%d mult" % times)
 				BugReport.note("  DAREDEVIL: next to danger at %s" % (board.mouse_cell + offset))
-				_flash_skill(Items.Skill.DAREDEVIL)
+				_flash_trait(Items.Trait.DAREDEVIL)
 				break
-	if run.has_skill(Items.Skill.SHOW_OFF) and slots.all(func(slot: CardSlot) -> bool:
+	if run.has_trait(Items.Trait.SHOW_OFF) and slots.all(func(slot: CardSlot) -> bool:
 			return slot.effect == CardSlot.Effect.BLOCKED or slot.get_card() != null):
-		var times := Score.show_off_times(run.skill_level(Items.Skill.SHOW_OFF))
+		var times := Score.show_off_times(run.trait_level(Items.Trait.SHOW_OFF))
 		turn_mult *= times
 		_pop_mult("×%d mult" % times)
 		BugReport.note("  SHOW-OFF: every slot filled")
-		_flash_skill(Items.Skill.SHOW_OFF)
+		_flash_trait(Items.Trait.SHOW_OFF)
 	_refresh_hud()
 
 
@@ -969,7 +1044,7 @@ func _pop_points() -> void:
 	Sfx.play(Sfx.Sound.POINTS, 1.0 + strongest * 0.6)
 
 
-## Pops up mult a trinket or skill added this turn, over the mouse.
+## Pops up mult a trinket or trait added this turn, over the mouse.
 func _pop_mult(text: String) -> void:
 	if board.animate:
 		Sfx.play(Sfx.Sound.MULT)
@@ -994,15 +1069,15 @@ func pop_turn_score(gained: int, points: int, mult: int) -> void:
 ## If the mouse is on a trap and THICK FUR hasn't broken as many traps this turn as its level, breaks
 ## the trap and returns true so the turn carries on.
 func _survive_trap() -> bool:
-	if not board.is_trapped() or traps_broken >= run.skill_level(Items.Skill.THICK_FUR):
+	if not board.is_trapped() or traps_broken >= run.trait_level(Items.Trait.THICK_FUR):
 		return false
 	traps_broken += 1
 	board.remove_trap(board.mouse_cell)
 	BugReport.note("  THICK FUR broke the trap at %s" % board.mouse_cell)
 	status_label.text = "Thick Fur! The trap broke."
-	# The preview's board doesn't animate, and the preview shouldn't light up the skill.
+	# The preview's board doesn't animate, and the preview shouldn't light up the trait.
 	if board.animate:
-		_flash_skill(Items.Skill.THICK_FUR)
+		_flash_trait(Items.Trait.THICK_FUR)
 	return true
 
 
@@ -1011,11 +1086,11 @@ func _survive_trap() -> bool:
 ## it started the turn on (turn_start_cell, which the cats' paths never cover) and the turn's other
 ## cards don't play (escaped). A blast at the end of the turn, it shrugs off where it is.
 func _spend_life() -> bool:
-	var skill := Items.Skill.NINE_LIVES
-	if not board.is_caught() or skill_charges.get(skill, 0) <= 0 or not run.has_skill(skill):
+	var nine := Items.Trait.NINE_LIVES
+	if not board.is_caught() or trait_charges.get(nine, 0) <= 0 or not run.has_trait(nine):
 		return false
-	skill_charges[skill] -= 1
-	var left := skill_charges[skill]
+	trait_charges[nine] -= 1
+	var left := trait_charges[nine]
 	if board.is_blasted():
 		board.blasted_by = null
 		board.queue_redraw()
@@ -1039,7 +1114,7 @@ func _spend_life() -> bool:
 		BugReport.note("  NINE LIVES: escaped from %s back to %s (%d left this round)" % [caught_at,
 			turn_start_cell, left])
 		status_label.text = "Nine Lives! The mouse escaped back to where it started the turn."
-	_flash_skill(skill)
+	_flash_trait(nine)
 	_refresh_skills()
 	return true
 
@@ -1197,17 +1272,27 @@ func _hand_size() -> int:
 	return run.hand_size
 
 
-## Pays CHEST_CRUMBS.
+## A chest drafts a trait once the turn is over (chests_to_open, _open_chest_draft). With nothing left to
+## offer (the trait slots full and every trait at its top level), it pays CHEST_CRUMBS at once instead.
 func _open_chest(cell: Vector2i) -> void:
 	Sfx.play(Sfx.Sound.CHEST)
-	run.crumbs += CHEST_CRUMBS
 	_add_points(Score.CHEST_POINTS, cell)
-	var text := "+%d" % CHEST_CRUMBS
+	if run.draft_pool(Items.Ability.TRAIT).is_empty():
+		_pay_chest_crumbs()
+		status_label.text = chest_note
+		BugReport.note("  Opened a chest at %s: +%d crumbs" % [cell, CHEST_CRUMBS])
+		return
+	chests_to_open += 1
+	status_label.text = "Chest! Pick a trait once the turn is over."
+	BugReport.note("  Opened a chest at %s: a trait to pick (%d waiting)" % [cell, chests_to_open])
+
+
+## Pays a chest's CHEST_CRUMBS, for when there's no trait left to draft.
+func _pay_chest_crumbs() -> void:
+	run.crumbs += CHEST_CRUMBS
 	chest_note = "Chest! %d crumbs." % CHEST_CRUMBS
+	chest_rewards.append("+%d" % CHEST_CRUMBS)
 	_refresh_hud()
-	chest_rewards.append(text)
-	status_label.text = chest_note
-	BugReport.note("  Opened a chest at %s: %s" % [cell, text])
 
 
 ## After a boss: Boss.HAND_GAINED more cards in hand and Boss.SLOTS_GAINED more card slots for the rest
@@ -1589,13 +1674,18 @@ func _refresh_trinkets() -> void:
 		trinket_row.add_child(tag)
 
 
-## Fills the Items.SKILL_SLOTS skill slots above the card slots with the run's skills, the rest empty,
-## showing each one's level, the charges it has left this round and whether it's on this turn. A skill
-## new to the run (drafted, or from the dev menu) starts with full charges; one the run lost turns off.
+## Fills the row above the card slots: the Items.SKILL_SLOTS skill slots with the run's skills, then,
+## past a gap, the Items.TRAIT_SLOTS trait slots with its traits, the rest of each empty. Each shows its
+## level and the charges it has left this round, and a skill whether it's on this turn. A skill or
+## trait new to the run (drafted, or from the dev menu) starts with full charges; a skill the run lost
+## turns off.
 func _refresh_skills() -> void:
 	for skill in run.skills:
 		if skill not in skill_charges:
-			skill_charges[skill] = Items.skill_charges(skill, run.skill_level(skill))
+			skill_charges[skill] = Items.charges(Items.Ability.SKILL, skill, run.skill_level(skill))
+	for trait_id in run.traits:
+		if trait_id not in trait_charges:
+			trait_charges[trait_id] = Items.charges(Items.Ability.TRAIT, trait_id, run.trait_level(trait_id))
 	for skill in active_skills.duplicate():
 		if not run.has_skill(skill):
 			active_skills.erase(skill)
@@ -1603,28 +1693,40 @@ func _refresh_skills() -> void:
 	for child in skill_row.get_children():
 		skill_row.remove_child(child)
 		child.queue_free()
-	for i in Items.SKILL_SLOTS:
+	_skill_slots = _make_ability_slots(Items.Ability.SKILL)
+	var gap := Control.new()
+	gap.custom_minimum_size.x = ABILITY_GROUP_GAP
+	skill_row.add_child(gap)
+	_trait_slots = _make_ability_slots(Items.Ability.TRAIT)
+
+
+## Adds the skill or trait slots to the row above the card slots, and returns them.
+func _make_ability_slots(kind: Items.Ability) -> Array[SkillSlot]:
+	var made: Array[SkillSlot] = []
+	var owned := run.owned(kind)
+	var charges := skill_charges if kind == Items.Ability.SKILL else trait_charges
+	for i in Items.slots(kind):
 		var slot := SkillSlot.new()
-		if i < run.skills.size():
-			var skill := run.skills[i]
-			slot.skill = skill
-			slot.level = run.skill_level(skill)
-			slot.charges = skill_charges[skill]
-			slot.active = skill in active_skills
-			slot.pressed.connect(use_skill.bind(skill))
+		slot.kind = kind
+		if i < owned.size():
+			var id := owned[i]
+			slot.id = id
+			slot.level = run.level(kind, id)
+			slot.charges = charges.get(id, 0)
+			if kind == Items.Ability.SKILL:
+				slot.active = id in active_skills
+				slot.pressed.connect(use_skill.bind(id))
 		skill_row.add_child(slot)
+		made.append(slot)
+	return made
 
 
-## Spends a charge of an ACTIVE skill to turn it on for this turn, before Lock In. Does nothing while
-## the cards play, when it has no charges left or when it's already on. A PASSIVE or AUTO skill says
-## that it works by itself.
+## Spends a charge of a skill to turn it on for this turn, before Lock In. Does nothing while the cards
+## play, when it has no charges left or when it's already on.
 func use_skill(skill: Items.Skill) -> void:
-	if busy or win_panel.visible or shop.visible or skill_draft.visible or not run.has_skill(skill):
+	if busy or win_panel.visible or shop.visible or draft.visible or not run.has_skill(skill):
 		return
 	var skill_name := Items.skill_name(skill).capitalize()
-	if Items.skill_use(skill) != Items.SkillUse.ACTIVE:
-		status_label.text = "%s works by itself." % skill_name
-		return
 	if skill in active_skills:
 		status_label.text = "%s is already on this turn." % skill_name
 		return
@@ -1661,9 +1763,17 @@ func _end_skills() -> void:
 ## Lights up the slot holding skill, when it does something.
 func _flash_skill(skill: Items.Skill) -> void:
 	var i := run.skills.find(skill)
-	if i != -1 and i < skill_row.get_child_count():
+	if i != -1 and i < _skill_slots.size() and is_instance_valid(_skill_slots[i]):
 		Sfx.play(Sfx.Sound.SKILL)
-		(skill_row.get_child(i) as SkillSlot).flash()
+		_skill_slots[i].flash()
+
+
+## Lights up the slot holding the trait, when it does something.
+func _flash_trait(trait_id: Items.Trait) -> void:
+	var i := run.traits.find(trait_id)
+	if i != -1 and i < _trait_slots.size() and is_instance_valid(_trait_slots[i]):
+		Sfx.play(Sfx.Sound.SKILL)
+		_trait_slots[i].flash()
 
 
 ## Rebuilds the pouch's consumable buttons in the hand header.
@@ -1694,9 +1804,10 @@ func _view_pile(title: String, cards: Array[CardData]) -> void:
 
 # Dev menu: shortcuts the F2 DevMenu calls. The menu logs each one with a "DEV:" note.
 
-## Gives every skill the run has its full charges for this round back.
+## Gives every skill and trait the run has its full charges for this round back.
 func refill_skill_charges() -> void:
 	skill_charges.clear()
+	trait_charges.clear()
 	_refresh_skills()
 
 
@@ -1847,19 +1958,24 @@ func _bug_report_state() -> String:
 	var trinket_names := PackedStringArray()
 	for trinket in run.trinkets:
 		trinket_names.append(Items.TRINKETS[trinket][0])
-	var skill_names := PackedStringArray()
-	for skill in run.skills:
-		var level := run.skill_level(skill)
-		var total := Items.skill_charges(skill, level)
-		skill_names.append("%s%s%s" % [Items.skill_title(skill, level),
-			" %d/%d" % [skill_charges.get(skill, 0), total] if total > 0 else "",
-			" (on)" if skill in active_skills else ""])
+	var ability_names := {}
+	for kind: Items.Ability in [Items.Ability.SKILL, Items.Ability.TRAIT]:
+		var names := PackedStringArray()
+		var charges := skill_charges if kind == Items.Ability.SKILL else trait_charges
+		for id in run.owned(kind):
+			var level := run.level(kind, id)
+			var total := Items.charges(kind, id, level)
+			names.append("%s%s%s" % [Items.title(kind, id, level),
+				" %d/%d" % [charges.get(id, 0), total] if total > 0 else "",
+				" (on)" if kind == Items.Ability.SKILL and id in active_skills else ""])
+		ability_names[kind] = ", ".join(names) if names else "-"
 	var pouch_names := PackedStringArray()
 	for item in run.pouch:
 		pouch_names.append(Items.CONSUMABLES[item][0])
-	lines.append("Crumbs %d (%d picked up this round), trinkets: %s, skills: %s, pouch: %s%s" % [run.crumbs,
-		round_crumbs, ", ".join(trinket_names) if trinket_names else "-",
-		", ".join(skill_names) if skill_names else "-", ", ".join(pouch_names) if pouch_names else "-",
+	lines.append("Crumbs %d (%d picked up this round), trinkets: %s, skills: %s, traits: %s, pouch: %s%s" % [
+		run.crumbs, round_crumbs, ", ".join(trinket_names) if trinket_names else "-",
+		ability_names[Items.Ability.SKILL], ability_names[Items.Ability.TRAIT],
+		", ".join(pouch_names) if pouch_names else "-",
 		", thick fur broke %d" % traps_broken if traps_broken > 0 else ""])
 	lines.append("Mouse %s facing %s, cheese %s, distance %d (%d by path)%s" % [board.mouse_cell,
 		Card.NAMES[board.facing], board.cheese_cell, _distance(board.mouse_cell, board.cheese_cell),
@@ -1985,7 +2101,7 @@ func _place_walls(mouse: Vector2i, cheese: Vector2i, traps: Array[Vector2i]) -> 
 	return board.walls
 
 
-## Finds a place to hide the chest in: a nook behind a bridge (see _nooks), or a pocket (see _pockets),
+## Finds a place to hide a chest in: a nook behind a bridge (see _nooks), or a pocket (see _pockets),
 ## the one farthest off the way to the cheese. The chasms and walls laid so far may have made one. If
 ## not, tries POCKET_TRIES U-shaped runs of wall (see _wall_run) that keep the way to the cheese within
 ## _longest_way, and lays the one that makes the farthest pocket. Returns the cell, or NO_CELL with
@@ -2024,7 +2140,7 @@ func _place_pocket(mouse: Vector2i, cheese: Vector2i, traps: Array[Vector2i]) ->
 
 ## Pockets: dead ends (see _dead_end) at least CHEST_MIN_DISTANCE from the mouse that make going by them
 ## on the way to the cheese take CHEST_MIN_DETOUR to CHEST_MAX_DETOUR more steps, given the steps from
-## the mouse to each cell, with the locks open. Maps each to those steps.
+## the mouse to each cell, with the locks open, and not holding a chest yet. Maps each to those steps.
 func _pockets(from_mouse: Dictionary[Vector2i, int], mouse: Vector2i, cheese: Vector2i) -> Dictionary[Vector2i, int]:
 	var from_cheese := board.distances_from(cheese, false, Board.Belts.TO, Board.Locks.OPEN)
 	var spacing := mini(CHEST_MIN_DISTANCE, board.grid - 2)
@@ -2032,7 +2148,7 @@ func _pockets(from_mouse: Dictionary[Vector2i, int], mouse: Vector2i, cheese: Ve
 	for cell in from_mouse:
 		var detour: int = from_mouse[cell] + from_cheese.get(cell, CHEST_MAX_DETOUR) - from_mouse[cheese]
 		if detour >= CHEST_MIN_DETOUR and detour <= CHEST_MAX_DETOUR and cell != cheese \
-				and _distance(cell, mouse) >= spacing and _dead_end(cell):
+				and _distance(cell, mouse) >= spacing and _dead_end(cell) and cell not in board.chests:
 			pockets[cell] = detour
 	return pockets
 
@@ -2327,7 +2443,7 @@ func _touches_chasm(cell: Vector2i, run_cells: Array[Vector2i]) -> bool:
 
 ## Nooks: the parts of the board, but the cheese's, that a bridge is the only way into from the mouse,
 ## with the locks open. Maps the cell in each farthest from the mouse and off the floor tiles, if it's
-## at least CHEST_MIN_DISTANCE from the mouse, to its steps from the mouse.
+## at least CHEST_MIN_DISTANCE from the mouse and doesn't hold a chest yet, to its steps from the mouse.
 func _nooks(mouse: Vector2i, cheese: Vector2i) -> Dictionary[Vector2i, int]:
 	var open := Board.Locks.OPEN
 	var from_mouse := board.distances_from(mouse, false, Board.Belts.FROM, open)
@@ -2344,7 +2460,7 @@ func _nooks(mouse: Vector2i, cheese: Vector2i) -> Dictionary[Vector2i, int]:
 			if not shut.has(cell) and cell != cheese and not board.has_tile(cell) \
 					and (far == NO_CELL or from_mouse[cell] > from_mouse[far]):
 				far = cell
-		if far != NO_CELL and _distance(far, mouse) >= spacing:
+		if far != NO_CELL and _distance(far, mouse) >= spacing and far not in board.chests:
 			nooks[far] = from_mouse[far]
 	return nooks
 
@@ -2989,21 +3105,20 @@ func _place_crumbs(mouse: Vector2i, cheese: Vector2i, traps: Array[Vector2i]) ->
 	return crumbs
 
 
-## Picks a cell for a chest out in the open, for a round with no walls to make a pocket of (see
-## _place_pocket): at least CHEST_MIN_DISTANCE from the mouse, and off the cheese, the traps, the floor
-## tiles, the keys, plates, crates and crate lanes, and the crumbs.
+## Picks a cell for a chest out in the open, for a round with no walls to make a pocket of, or no
+## pocket left (see _place_pocket): at least CHEST_MIN_DISTANCE from the mouse, and off the cheese, the
+## traps, the floor tiles, the keys, plates, crates, chests and crate lanes, and the crumbs. Returns
+## NO_CELL if none is found.
 func _place_chest(mouse: Vector2i, cheese: Vector2i, traps: Array[Vector2i],
-		crumbs: Array[Vector2i]) -> Array[Vector2i]:
-	var chests: Array[Vector2i] = []
+		crumbs: Array[Vector2i]) -> Vector2i:
 	var spacing := mini(CHEST_MIN_DISTANCE, board.grid - 2)
 	for attempt in 1000:
 		var cell := _random_cell()
 		if _distance(cell, mouse) >= spacing and cell != cheese and cell not in traps \
 				and cell not in crumbs and not board.has_tile(cell) and not board.has_item(cell) \
 				and cell not in _kept_clear:
-			chests.append(cell)
-			break
-	return chests
+			return cell
+	return NO_CELL
 
 
 ## Picks cat cells off the cheese, the traps, the chasms, the pylons and flamethrowers and the crates,

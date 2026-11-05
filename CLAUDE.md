@@ -8,7 +8,7 @@ Each round also gives `DISCARDS_PER_ROUND` (5) discards: right-click a card (on 
 discard area under the hand (lit while a card is dragged), to swap it for a new draw (`main.gd` `discard_card`).
 The whole hand is discarded at Lock In. The dev menu's **Keep hand** checkbox (`main.gd` `keep_hand`,
 off by default; the sim's `--keep-hand on`) keeps the cards left in the hand for the next
-turn (`kept`), which then draws only up to the hand size. The PACK RAT skill keeps the leftmost
+turn (`kept`), which then draws only up to the hand size. The PACK RAT trait keeps the leftmost
 `Items.PACK_RAT_CARDS` (2) of them (`main.gd` `_cards_kept`). Dropping a card on a card in the hand
 puts it in that card's place, so the hand can be put in order.
 
@@ -20,7 +20,7 @@ showed a tip doesn't press the button under it. A card's tip shows as its hold-t
 Desktop play is unchanged. To try it on a PC, set `Input.emulate_touch_from_mouse`. Bug reports from a
 phone save to `user://bug_reports`.
 
-The **Preview** checkbox in the F2 dev menu (`main.gd` `preview_on`), or the KEEN WHISKERS skill
+The **Preview** checkbox in the F2 dev menu (`main.gd` `preview_on`), or the KEEN WHISKERS trait
 (`_previewing`), draws where the slotted cards would take the mouse, as a dashed
 line on the board ending in a ring (red cross if caught, green on the cheese, pale blue in glue, "?"
 before a GAMBLE slot's random move). `main.gd` `_update_preview` plays the turn through the same
@@ -151,24 +151,29 @@ then growing every few rounds to its max, which the later ones reach in endless 
 path length around the walls and traps (`Board.distances_from`) with a few spare turns that shrink
 over the run.
 
-A round may have a **chest** (`main.gd` `CHEST_CHANCE`), in a pocket of wall once the round has
-walls (`_place_pocket`) or out in the open before then (`_place_chest`), opened by walking or
-sliding over it like a crumb. It pays `CHEST_CRUMBS` (12) (`_open_chest`).
+Every round has a **chest**, and a second with `main.gd` `SECOND_CHEST_CHANCE` (0.3), each in a
+pocket of wall once the round has walls (`_place_pocket`, which skips a nook or pocket that already
+holds one) or out in the open before then or when no pocket is left (`_place_chest`), opened by
+walking or sliding over it like a crumb. Opening one drafts a **trait** (see Traits): the draft waits
+until the turn's cards are done (`chests_to_open`), opening at the start of the next turn
+(`start_turn` → `_open_chest_draft`) or, on the turn that reaches the cheese, after the win panel
+(`_continue_after_round`). Once the trait slots are full and every trait is at its top level, a chest
+pays `CHEST_CRUMBS` (12) instead (`_pay_chest_crumbs`).
 
 Card slots (`Run.slots`, up to 8, never more than cards in hand) and cards in hand (`Run.hand_size`,
 up to 10) grow only by beating a boss: each adds `Boss.SLOTS_GAINED` and `Boss.HAND_GAINED` (1 each)
 for the rest of the run, from the next round (`main.gd` `_boss_upgrade`). `_build_slots` rebuilds the
 slots at the start of a turn and shrinks the cards so the slots and the hand each fit their row.
 
-Rounds chain into a **run**: the deck, crumbs, trinkets, pouch, slots and hand size carry over until a trap
+Rounds chain into a **run**: the deck, crumbs, trinkets, skills, traits, pouch, slots and hand size carry over until a trap
 or a cat catches the mouse (or a pylon or flamethrower), or the turns run out, or a boss round ends short of its score target (`main.gd` `lost()`), which starts a new run.
 Beating round `Run.GOAL_ROUNDS` (21, a boss round) wins the run (`main.gd` `won_run()`): the win
 panel offers Endless, which goes on to the shop and sets `Run.endless` (the difficulty keeps
 climbing to its caps), or New Run. The HUD shows "Round N of 21", then "Endless round N". A won round pays crumbs (`WIN_CRUMBS` + unused discards + the score bonus, plus
-crumbs picked up on the board), then opens the **shop** (after a boss, once its skill draft is done).
+crumbs picked up on the board), then opens the **shop** (once the drafts after the round are done).
 It sells trinkets (passive for the run), consumables (held in the pouch, used once), and card
 upgrades: card stamps (a slot effect stuck on one card) and card materials share one row, 2 picks
-from both pools together (`shop.gd` `_row_of`). Skills aren't sold (see Skills). The trinket row
+from both pools together (`shop.gd` `_row_of`). Skills and traits aren't sold (see Skills and traits). The trinket row
 has a Reroll button (`shop.gd` `_reroll`): the first reroll in a visit costs `Shop.REROLL_PRICE`
 (5) crumbs and each one after costs 5 more. A
 stamped card plays its slot's effect first, then its stamp (`main.gd` `_play`): a BURN slot with a
@@ -201,10 +206,10 @@ and `_bank_turn` adds the turn to the score, with `Score.SPARE_TURN_MULT` per tu
 turn that reaches the cheese. Only the real board is connected, so the preview scores nothing. The
 round's target (`Score.target`) grows each round, and more in a boss round. Meeting it pays bonus
 crumbs (`Score.crumbs`), and missing it in a boss round ends the run (`_short_of_boss_target`). The
-score trinkets are BUTTER PAT and RIDE TICKET; the score skills are HARD HEAD, DAREDEVIL and SHOW-OFF.
+score trinkets are BUTTER PAT and RIDE TICKET; the score traits are HARD HEAD, DAREDEVIL and SHOW-OFF.
 
 Score shows as **popups** (`scripts/score_popup.gd` `ScorePopup`): points pop up on the cell that
-made them (`main.gd` `_add_points`, which every point source goes through), mult from trinkets and skills over
+made them (`main.gd` `_add_points`, which every point source goes through), mult from trinkets and traits over
 the mouse (`_pop_mult`), and the banked turn over the board (`pop_turn_score`). Each popup's
 intensity grows with the score (a move's points on a log scale, a turn's against the round's target):
 bigger, hotter in color, shaking, with sparks and a ring at the top. No popups when
@@ -222,42 +227,53 @@ BOSS in boss rounds), each three looping layers; the tension layer fades in with
 stops when a run is lost. Volumes and mute (the speaker button by the trinkets, `SoundButton`, or M)
 are saved to `user://settings.cfg`. The dev menu's Sound tab plays every sound and song.
 
-**Skills** (`Items.Skill`, `Run.skills`) are strong, run-defining abilities, kept for the rest of
-the run in `Items.SKILL_SLOTS` (4) slots shown above the card slots (`main.gd` `_refresh_skills`,
-`SkillSlot`). They aren't sold: a **skill draft** (`scripts/skill_draft.gd` `SkillDraft`, `main.gd`
-`_open_draft`) offers `Items.DRAFT_CHOICES` (3) of them to take one, over the first round's board at
-the start of a run and as a boss's reward (between the win panel and the shop). Drafting a skill
-the run has levels it up (`Run.skill_levels`, `Run.add_skill`, up to the top level in `Items.SKILLS`),
-and once the slots are full a draft only offers level-ups (`Run.draft_pool`); with nothing left to
-offer there's no draft. Each skill's `Items.SkillUse` says how it works:
-- **ACTIVE** (WARP, SPRINT, BURROW): `Items.skill_charges` charges a round (`Items.SKILL_CHARGES` at
-  level 1, `SKILL_CHARGES_PER_LEVEL` more each level; `main.gd` `skill_charges`, refilled in
-  `new_round`). Clicking its slot before Lock In spends a charge and turns it on for that turn
-  (`use_skill`, `active_skills`), shown by a bright rim and the charge pips; `_end_skills` turns them
-  off once the turn's cards have played. WARP makes every step wrap round the board's edges like a
-  WRAP slot (`Board.warp`). SPRINT makes a card that would take a single step take two, and BURROW
-  makes it a TUNNEL jump instead (both, two jumps; `_single_step`).
-- **AUTO** (NINE LIVES): charges it spends by itself (`_spend_life`). Caught by a trap or a cat during
-  the cards, the mouse goes back to `turn_start_cell` (which the cats' paths never cover) and the
-  turn's other cards fizzle (`escaped`); caught by a blast at the end of the turn, it shrugs it off.
-- **PASSIVE** (always on): THICK FUR breaks the first trap a turn (one more each level;
-  `_survive_trap`, `traps_broken`), KEEN WHISKERS shows the preview, PACK RAT keeps 2 cards of the hand, and the
-  score skills: HARD HEAD adds mult for each bump, DAREDEVIL multiplies it when the cards leave the
-  mouse next to danger, and SHOW-OFF when every slot that isn't blocked holds a card (`_score_cards`,
-  numbers in `Score`, growing by level).
+**Skills and traits** are the mouse's abilities, kept for the rest of the run in slots shown above the
+card slots: `Items.SKILL_SLOTS` (4) skill slots on the left and, past a gap, `Items.TRAIT_SLOTS` (4)
+trait slots on the right (`main.gd` `_refresh_skills`, `SkillSlot`). Both kinds are an `Items.Ability`
+(SKILL or TRAIT), and most of `Items` and `Run` takes one (`Items.title`, `Items.text`,
+`Items.use_text`, `Items.charges`, `Run.owned`, `Run.level`, `Run.add`, `Run.draft_pool`). Neither is
+sold: a **draft** (`scripts/draft.gd` `Draft`) offers `Items.DRAFT_CHOICES` (3) of one kind to take
+one. Drafting one the run has levels it up (`Run.skill_levels` / `trait_levels`, up to the top level in
+`Items.SKILLS` / `TRAITS`), and once that kind's slots are full a draft only offers level-ups; with
+nothing left to offer there's no draft.
+- **Skills** (`Items.Skill`, `Run.skills`) are what the mouse *does when the player says so*: every one
+  is clicked. They're drafted over the first round's board at the start of a run and as a boss's reward
+  (`main.gd` `_open_draft`). Each has `Items.charges` charges a round (`Items.SKILL_CHARGES` at level 1,
+  `CHARGES_PER_LEVEL` more each level; `main.gd` `skill_charges`, refilled in `new_round`). Clicking its
+  slot before Lock In spends a charge and turns it on for that turn (`use_skill`, `active_skills`), shown
+  by a bright rim and the charge pips; `_end_skills` turns them off once the turn's cards have played.
+  WARP makes every step wrap round the board's edges like a WRAP slot (`Board.warp`). SPRINT makes a
+  card that would take a single step take two, and BURROW makes it a TUNNEL jump instead (both, two
+  jumps; `_single_step`).
+- **Traits** (`Items.Trait`, `Run.traits`) are what the mouse *is*: passive, always at work, nothing to
+  click. Each chest opened drafts one (see the chest above; `_open_chest_draft`). THICK FUR breaks the
+  first trap a turn (one more each level; `_survive_trap`, `traps_broken`), KEEN WHISKERS shows the
+  preview, PACK RAT keeps 2 cards of the hand, and the score traits: HARD HEAD adds mult for each bump,
+  DAREDEVIL multiplies it when the cards leave the mouse next to danger, and SHOW-OFF when every slot
+  that isn't blocked holds a card (`_score_cards`, numbers in `Score`, growing by level). NINE LIVES has
+  charges (`Items.TRAIT_CHARGES`, `main.gd` `trait_charges`) that it spends by itself (`_spend_life`):
+  caught by a trap or a cat during the cards, the mouse goes back to `turn_start_cell` (which the cats'
+  paths never cover) and the turn's other cards fizzle (`escaped`); caught by a blast at the end of the
+  turn, it shrugs it off.
 
-A skill's description at a level is `Items.skill_text`, and how it's used `Items.skill_use_text`. A
-skill's slot lights up (`_flash_skill`) whenever it does something. The dev menu's Items tab adds,
-removes and levels skills and refills the charges, and its Run tab opens a draft.
+After a won round, `_continue_after_round` opens the drafts of chests opened on its last turn, then a
+boss's skill draft, then the shop. A slot lights up (`_flash_skill`, `_flash_trait`) whenever its skill
+or trait does something. The dev menu's Items tab adds, removes and levels skills and traits and
+refills the charges, and its Run tab opens a skill draft or a chest's trait draft.
 
-**Trinkets are objects, skills are traits.** Any new or renamed item follows these rules:
+**Trinkets are objects, skills are actions, traits are what the mouse is.** Any new or renamed item
+follows these rules:
 - A **trinket** is a physical thing the mouse carries, named as one (PIGGY BANK, CRUMB MAGNET), and
   its effect is what that object would plausibly do: a piggy bank saves crumbs, a magnet pulls them in.
   Never a body part, an ability or an adjective.
-- A **skill** is a trait or ability of the mouse itself, named as something the mouse is or can do
-  (WARP, THICK FUR), and its effect is that trait at work. Never an object.
-- If an idea reads as something the mouse *has in its pouch*, it's a trinket; if it reads as
-  something the mouse *is or does*, it's a skill. Pick the name and the category together.
+- A **skill** is something the mouse can do when the player chooses, named as that action (WARP,
+  SPRINT, BURROW): it's clicked, spends a charge and works for that turn. Never an object, and never
+  passive.
+- A **trait** is something the mouse is, named as that quality (THICK FUR, HARD HEAD, KEEN WHISKERS):
+  it works by itself, with nothing to click. Never an object.
+- If an idea reads as something the mouse *has in its pouch*, it's a trinket; as something the player
+  *tells the mouse to do*, a skill; as something the mouse *is*, always at work, a trait. Pick the name
+  and the category together.
 
 Every `Boss.EVERY` (3) rounds is a **boss round** with an extra rule: THE ALLEY KING (a big cat that
 hunts the mouse, on top of the usual cats), RUNAWAY CHEESE (the cheese runs from the mouse; a few
@@ -308,20 +324,22 @@ pays `Boss.WIN_CRUMBS`, adds a card slot and a card in hand, and drafts a skill.
 - `scripts/card_data.gd` — `CardData`: a deck card's direction, stamp and material. Piles hold these.
 - `scripts/deck.gd` — `Deck`: the run's `cards`, and the round's draw and discard piles built from them.
 - `scripts/run.gd` — `Run`: state that lasts a run (deck, slots, hand size, round number, crumbs, trinkets,
-  skills, pouch, this and the next boss, bosses beaten).
-- `scripts/items.gd` — `Items`: shop content, meaning the `Trinket`, `Skill`, `Consumable` and
-  `CardMaterial` enums with name / description / price tables, and the `STAMPS` the shop offers.
-- `scripts/item_icon.gd` — `ItemIcon`: a `Texture2D` that draws a trinket's, skill's, consumable's,
-  stamp's or material's symbol in code (`ItemIcon.trinket(id)`, ...), so it works as a `Button.icon` or
-  in a `TextureRect`. A new trinket, skill, consumable or material needs a symbol in `_draw_trinket` /
-  `_draw_skill` / `_draw_consumable` / `_draw_material`.
-- `scripts/skill_slot.gd` — `SkillSlot`: one of the skill slots in `%SkillRow` above the card slots,
-  drawn as a squarer card with the skill's symbol, name, level and charges (or ALWAYS ON), or empty.
-  `flash()` lights it up when its skill does something.
+  skills, traits, pouch, this and the next boss, bosses beaten).
+- `scripts/items.gd` — `Items`: shop content, meaning the `Trinket`, `Consumable` and `CardMaterial`
+  enums with name / description / price tables and the `STAMPS` the shop offers, and the `Skill` and
+  `Trait` enums (both an `Ability`) with name / top level tables, charges and descriptions.
+- `scripts/item_icon.gd` — `ItemIcon`: a `Texture2D` that draws a trinket's, skill's, trait's,
+  consumable's, stamp's or material's symbol in code (`ItemIcon.trinket(id)`, `ItemIcon.ability(kind,
+  id)`, ...), so it works as a `Button.icon` or in a `TextureRect`. A new trinket, skill, trait,
+  consumable or material needs a symbol in `_draw_trinket` / `_draw_skill` / `_draw_trait` /
+  `_draw_consumable` / `_draw_material`.
+- `scripts/skill_slot.gd` — `SkillSlot`: one of the skill or trait slots in `%SkillRow` above the card
+  slots, drawn as a squarer card with the skill's or trait's symbol, name, level and charges (or ALWAYS
+  ON), or empty. `flash()` lights it up when it does something.
 - `scripts/shop.gd` — `Shop`: overlay after a won round. Rolls offers, rerolls the trinket row,
   sells them, and picks the card for a stamp or material.
-- `scripts/skill_draft.gd` — `SkillDraft`: overlay that offers skills to take one, at the start of a
-  run and after each boss (see Skills).
+- `scripts/draft.gd` — `Draft`: overlay that offers skills or traits to take one: skills at the start
+  of a run and after each boss, a trait from each chest (see Skills and traits).
 - `scripts/touch_tips.gd` — `TouchTips`: hold-to-show tooltips on a touchscreen (see Touch above).
 - `scripts/synth.gd` — `Synth`: builds sounds out of waves and noise (see Sound above).
 - `scripts/sfx.gd` — `Sfx`: the sound effects (`Sound`, `build`), button clicks, the Music and Sfx
@@ -368,13 +386,15 @@ The sim lets runs go on, so it prints win/loss rates per round number (the diffi
 `--slots N` / `--hand N` to start every run with that many slots / cards in hand. The round table
 also shows the bot's mean score in won rounds against the target. The bot plays for the cheese, not the
 score, so its score is a floor. `--trinkets butter_pat,ride_ticket` starts every run with those
-trinkets, `--skills hard_head,daredevil` with those skills in place of the start-of-run draft (the
-bot uses each ACTIVE skill's charges as soon as it can), and `--materials wood,gold` makes the
+trinkets, `--skills warp,sprint` with those skills in place of the start-of-run draft (the bot uses
+each skill's charges as soon as it can), `--traits hard_head,daredevil` with those traits (the bot
+then skips the chests' trait drafts, so runs keep just those), and `--materials wood,gold` makes the
 starting deck's cards those materials, taking turns. The bot plays few cards a turn, so a STONE deck
 scores far more for it than for a player who fills the slots. Without `--skills`, the bot takes a
 random skill from each run's start draft and the report shows rounds won per run by that skill;
-`--draft off` starts runs with none. The bot never beats a boss (bosses are off), so it never
-drafts again.
+`--draft off` starts runs with none. Without `--traits`, it takes a random trait from each chest it
+happens to open (it doesn't go for them), and the report counts chests laid, opened and traits
+drafted. The bot never beats a boss (bosses are off), so it never drafts a skill again.
 
 A new `class_name` script isn't visible to the parse check until Godot refreshes its class cache:
 `"/c/Program Files/Godot/godot.exe" --headless --path . --import`.
