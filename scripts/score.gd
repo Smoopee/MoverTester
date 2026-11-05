@@ -2,7 +2,7 @@ class_name Score
 extends RefCounted
 ## The round's score, separate from crumbs (which are money). Each turn adds up points for what the
 ## mouse does (cells moved, crumbs and chests picked up, rides on holes, belts and pads), times the
-## turn's mult, which starts at 1 and grows from score trinkets and skills and from spare turns on the turn that
+## turn's mult, which starts at 1 and grows from score trinkets and traits and from spare turns on the turn that
 ## reaches the cheese. Each round has a target (target()): meeting it pays bonus crumbs, and missing it
 ## in a boss round ends the run.
 
@@ -25,7 +25,7 @@ const MAX_TARGET_CRUMBS := 9
 ## Score trinkets (Items.Trinket).
 const BUTTER_PAT_POINTS := 2
 const RIDE_TICKET_MULT := 2
-## Score skills (Items.Skill), always on. HARD HEAD adds HARD_HEAD_MULT mult a bump at each level.
+## Score traits (Items.Trait), always on. HARD HEAD adds HARD_HEAD_MULT mult a bump at each level.
 ## DAREDEVIL and SHOW-OFF multiply the mult by their TIMES at level 1, and GROWTH more each level after.
 const HARD_HEAD_MULT := 2
 const DAREDEVIL_TIMES := 2

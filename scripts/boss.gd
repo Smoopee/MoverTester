@@ -2,7 +2,7 @@ class_name Boss
 extends RefCounted
 ## Boss rounds: every EVERY rounds, a round with a rule that makes it harder. The shop before one says
 ## which boss is next. Beating a boss pays WIN_CRUMBS, adds HAND_GAINED cards in hand and SLOTS_GAINED
-## card slots for the rest of the run (Main._boss_upgrade), and drafts a skill (SkillDraft): a new one,
+## card slots for the rest of the run (Main._boss_upgrade), and drafts a skill (Draft): a new one,
 ## or the next level of one the run has.
 
 enum Kind { ALLEY_KING, RUNAWAY_CHEESE, KITCHEN_LIGHT }

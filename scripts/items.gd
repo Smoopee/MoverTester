@@ -2,11 +2,13 @@ class_name Items
 extends RefCounted
 ## The run's items. The shop sells trinkets (passive for the rest of the run), consumables (held in
 ## the pouch, used once), card stamps (which change how a card moves) and card materials (which change
-## what it pays when it plays). Skills, held in the SKILL_SLOTS slots above the card slots, aren't
-## sold: they're drafted at the start of a run and after each boss (SkillDraft).
+## what it pays when it plays). Skills and traits, held in the SKILL_SLOTS and TRAIT_SLOTS slots above
+## the card slots, aren't sold: skills are drafted at the start of a run and after each boss, and
+## traits from each chest the mouse opens (Draft).
 
-## A trinket is an object the mouse carries and does what that object would; a skill is a trait of
-## the mouse itself (see CLAUDE.md).
+## A trinket is an object the mouse carries and does what that object would; a skill is something the
+## mouse can do when the player says so, and a trait is something the mouse is, always at work (see
+## CLAUDE.md).
 enum Trinket {
 	WASTEBASKET, FOUR_LEAF_CLOVER, CRUMB_MAGNET, PIGGY_BANK, SALT_SHAKER,
 	# Score trinkets (see Score).
@@ -16,20 +18,26 @@ enum Trinket {
 ## which pays when the card stays in the hand.
 enum CardMaterial { NONE, WOOD, SHINY, GOLD, COPPER, PAPER, STONE }
 enum Consumable { FRESH_BREEZE, CALM, NEW_PAWS, CHEESE_BAIT, SQUEEZE }
-enum Skill {
-	# Movement.
-	WARP, SPRINT, BURROW,
+## Skills are what the mouse does when the player says so: click one's slot before Lock In to spend a
+## charge and turn it on for that turn.
+enum Skill { WARP, SPRINT, BURROW }
+## Traits are what the mouse is: passive, always at work, with nothing to click.
+enum Trait {
 	# Survival.
 	THICK_FUR, NINE_LIVES,
 	# Sight and hand.
 	KEEN_WHISKERS, PACK_RAT,
-	# Score skills (see Score).
+	# Score traits (see Score).
 	HARD_HEAD, DAREDEVIL, SHOW_OFF,
 }
+## Skills and traits are both abilities of the mouse, kept for the run in slots and leveled up by
+## drafting them again. Functions that take an Ability work on either.
+enum Ability { SKILL, TRAIT }
 
 const TRINKET_COLOR := Color("f5c542")
 const CONSUMABLE_COLOR := Color("6fd6c8")
 const SKILL_COLOR := Color("e86aa6")
+const TRAIT_COLOR := Color("b48cf2")
 ## Name, description and price of each trinket.
 const TRINKETS := {
 	Trinket.WASTEBASKET: ["WASTEBASKET", "Room to toss more cards: +2 discards every round.", 6],
@@ -50,36 +58,39 @@ const CONSUMABLES := {
 	Consumable.CHEESE_BAIT: ["CHEESE BAIT", "Remove the trap nearest the mouse.", 4],
 	Consumable.SQUEEZE: ["SQUEEZE", "This turn the mouse squeezes through walls.", 3],
 }
-## How a skill works. An ACTIVE one does nothing until it's used: click its slot before Lock In to
-## spend a charge and turn it on for that turn. A PASSIVE one is always on. An AUTO one spends a charge
-## by itself, when it saves the mouse.
-enum SkillUse { ACTIVE, PASSIVE, AUTO }
-## Name, use and top level of each skill. Skills aren't sold: the player drafts one at the start of a
-## run and after each boss (SkillDraft), and drafting one the run has levels it up.
+## Name and top level of each skill. Skills aren't sold: the player drafts one at the start of a run
+## and after each boss (Draft), and drafting one the run has levels it up.
 const SKILLS := {
-	Skill.WARP: ["WARP", SkillUse.ACTIVE, 3],
-	Skill.SPRINT: ["SPRINT", SkillUse.ACTIVE, 3],
-	Skill.BURROW: ["BURROW", SkillUse.ACTIVE, 3],
-	Skill.THICK_FUR: ["THICK FUR", SkillUse.PASSIVE, 2],
-	Skill.NINE_LIVES: ["NINE LIVES", SkillUse.AUTO, 3],
-	Skill.KEEN_WHISKERS: ["KEEN WHISKERS", SkillUse.PASSIVE, 1],
-	Skill.PACK_RAT: ["PACK RAT", SkillUse.PASSIVE, 1],
-	Skill.HARD_HEAD: ["HARD HEAD", SkillUse.PASSIVE, 3],
-	Skill.DAREDEVIL: ["DAREDEVIL", SkillUse.PASSIVE, 3],
-	Skill.SHOW_OFF: ["SHOW-OFF", SkillUse.PASSIVE, 3],
+	Skill.WARP: ["WARP", 3],
+	Skill.SPRINT: ["SPRINT", 3],
+	Skill.BURROW: ["BURROW", 3],
 }
-## Charges a round at level 1 of each skill that has them (ACTIVE and AUTO). Each level after adds
-## SKILL_CHARGES_PER_LEVEL. Charges refill at the start of every round.
+## Name and top level of each trait. Traits aren't sold: each chest the mouse opens drafts one (Draft),
+## and drafting one the run has levels it up.
+const TRAITS := {
+	Trait.THICK_FUR: ["THICK FUR", 2],
+	Trait.NINE_LIVES: ["NINE LIVES", 3],
+	Trait.KEEN_WHISKERS: ["KEEN WHISKERS", 1],
+	Trait.PACK_RAT: ["PACK RAT", 1],
+	Trait.HARD_HEAD: ["HARD HEAD", 3],
+	Trait.DAREDEVIL: ["DAREDEVIL", 3],
+	Trait.SHOW_OFF: ["SHOW-OFF", 3],
+}
+## Charges a round at level 1 of each skill, and of each trait that has them (NINE LIVES, which spends
+## them by itself). Each level after adds CHARGES_PER_LEVEL. Charges refill at the start of every round.
 const SKILL_CHARGES := {
 	Skill.WARP: 2,
 	Skill.SPRINT: 1,
 	Skill.BURROW: 1,
-	Skill.NINE_LIVES: 1,
 }
-const SKILL_CHARGES_PER_LEVEL := 1
-## Skills the player can hold at once. With them full, a draft only offers level-ups.
+const TRAIT_CHARGES := {
+	Trait.NINE_LIVES: 1,
+}
+const CHARGES_PER_LEVEL := 1
+## Skills and traits the player can hold at once. With the slots full, a draft only offers level-ups.
 const SKILL_SLOTS := 4
-## Skills a draft offers, of which the player takes one.
+const TRAIT_SLOTS := 4
+## Skills or traits a draft offers, of which the player takes one.
 const DRAFT_CHOICES := 3
 const ROMAN: Array[String] = ["", "I", "II", "III", "IV", "V"]
 ## Cards left in the hand at Lock In that PACK RAT keeps for the next turn, the leftmost first.
@@ -122,44 +133,71 @@ static func stamp_price(effect: CardSlot.Effect) -> int:
 	return STAMP_PRICES.get(effect, STAMP_PRICE)
 
 
+static func slots(kind: Ability) -> int:
+	return SKILL_SLOTS if kind == Ability.SKILL else TRAIT_SLOTS
+
+
+static func color(kind: Ability) -> Color:
+	return SKILL_COLOR if kind == Ability.SKILL else TRAIT_COLOR
+
+
+## "SKILL" or "TRAIT".
+static func kind_word(kind: Ability) -> String:
+	return "SKILL" if kind == Ability.SKILL else "TRAIT"
+
+
+## Every Items.Skill or Items.Trait value.
+static func all(kind: Ability) -> Array:
+	return Skill.values() if kind == Ability.SKILL else Trait.values()
+
+
+static func ability_name(kind: Ability, id: int) -> String:
+	return (SKILLS if kind == Ability.SKILL else TRAITS)[id][0]
+
+
+static func max_level(kind: Ability, id: int) -> int:
+	return (SKILLS if kind == Ability.SKILL else TRAITS)[id][1]
+
+
 static func skill_name(skill: Skill) -> String:
-	return SKILLS[skill][0]
+	return ability_name(Ability.SKILL, skill)
 
 
-static func skill_use(skill: Skill) -> SkillUse:
-	return SKILLS[skill][1]
-
-
-static func skill_max_level(skill: Skill) -> int:
-	return SKILLS[skill][2]
+static func trait_name(trait_id: Trait) -> String:
+	return ability_name(Ability.TRAIT, trait_id)
 
 
 ## "THICK FUR" at level 1, "THICK FUR II" at level 2.
-static func skill_title(skill: Skill, level: int) -> String:
-	return skill_name(skill) if level <= 1 else "%s %s" % [skill_name(skill), ROMAN[mini(level, ROMAN.size() - 1)]]
+static func title(kind: Ability, id: int, level: int) -> String:
+	var base := ability_name(kind, id)
+	return base if level <= 1 else "%s %s" % [base, ROMAN[mini(level, ROMAN.size() - 1)]]
 
 
-## Charges a round at level: none for a PASSIVE skill.
-static func skill_charges(skill: Skill, level: int) -> int:
-	if skill not in SKILL_CHARGES:
+## Charges a round at level: none for a trait that's always on.
+static func charges(kind: Ability, id: int, level: int) -> int:
+	var table: Dictionary = SKILL_CHARGES if kind == Ability.SKILL else TRAIT_CHARGES
+	if id not in table:
 		return 0
-	return SKILL_CHARGES[skill] + (maxi(level, 1) - 1) * SKILL_CHARGES_PER_LEVEL
+	return table[id] + (maxi(level, 1) - 1) * CHARGES_PER_LEVEL
 
 
-## How the skill is used at level: "Click its slot to use it: 2 charges a round.", "Always on.", ...
-static func skill_use_text(skill: Skill, level: int) -> String:
-	var charges := skill_charges(skill, level)
-	match skill_use(skill):
-		SkillUse.ACTIVE:
-			return "Click its slot before Lock In to use it: %d charge%s a round." % [charges, "" if charges == 1 else "s"]
-		SkillUse.AUTO:
-			return "Works by itself, %d time%s a round." % [charges, "" if charges == 1 else "s"]
+## How a skill or trait is used at level: "Click its slot before Lock In to use it: 2 charges a
+## round.", "Works by itself, 1 time a round.", "Always on."
+static func use_text(kind: Ability, id: int, level: int) -> String:
+	var count := charges(kind, id, level)
+	if kind == Ability.SKILL:
+		return "Click its slot before Lock In to use it: %d charge%s a round." % [count, "" if count == 1 else "s"]
+	if count > 0:
+		return "Works by itself, %d time%s a round." % [count, "" if count == 1 else "s"]
 	return "Always on."
 
 
-## What the skill does at level.
-static func skill_text(skill: Skill, level: int) -> String:
-	level = maxi(level, 1)
+## What a skill or trait does at level.
+static func text(kind: Ability, id: int, level: int) -> String:
+	return skill_text(id, level) if kind == Ability.SKILL else trait_text(id, level)
+
+
+static func skill_text(skill: Skill, _level: int) -> String:
 	match skill:
 		Skill.WARP:
 			return "This turn, every step off an edge brings the mouse in on the opposite side, as in a WRAP slot."
@@ -168,24 +206,30 @@ static func skill_text(skill: Skill, level: int) -> String:
 		Skill.BURROW:
 			return "This turn, every card that would take a single step digs instead: it jumps 2 cells, " \
 				+ "under any wall, locked door or gate and over whatever is in between."
-		Skill.THICK_FUR:
+	return ""
+
+
+static func trait_text(trait_id: Trait, level: int) -> String:
+	level = maxi(level, 1)
+	match trait_id:
+		Trait.THICK_FUR:
 			return "The first %s the mouse lands on each turn breaks instead of catching it." % (
 				"trap" if level == 1 else "%d traps" % level)
-		Skill.NINE_LIVES:
+		Trait.NINE_LIVES:
 			return "When a trap or a cat catches the mouse, it escapes back to where the turn started, and " \
 				+ "the turn's other cards don't play. A pylon's or flamethrower's blast, it shrugs off."
-		Skill.KEEN_WHISKERS:
+		Trait.KEEN_WHISKERS:
 			return "Shows on the board where the cards in the slots will take the mouse, before you Lock In."
-		Skill.PACK_RAT:
+		Trait.PACK_RAT:
 			return "The %d leftmost cards left in your hand at Lock In stay there for the next turn, which draws only up to your hand size." \
 				% PACK_RAT_CARDS
-		Skill.HARD_HEAD:
+		Trait.HARD_HEAD:
 			return "Score: +%d mult each time the mouse bumps into a wall, the edge or anything else in its way." \
 				% Score.hard_head_mult(level)
-		Skill.DAREDEVIL:
+		Trait.DAREDEVIL:
 			return "Score: x%d mult on a turn whose cards leave the mouse next to a trap, a cat or a cat's path." \
 				% Score.daredevil_times(level)
-		Skill.SHOW_OFF:
+		Trait.SHOW_OFF:
 			return "Score: x%d mult on a turn you Lock In with a card in every slot that isn't blocked." \
 				% Score.show_off_times(level)
 	return ""

@@ -126,7 +126,7 @@ theme_override_constants/separation = 14
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 4
-theme_override_constants/separation = 16
+theme_override_constants/separation = 8
 
 [node name="SkillGap" type="Control" parent="Margin/Layout/Side/PlayArea"]
 custom_minimum_size = Vector2(0, 4)

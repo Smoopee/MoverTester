@@ -1,9 +1,9 @@
 class_name ItemIcon
 extends Texture2D
-## A small symbol for a trinket, skill, consumable, card stamp or card material, drawn in code in the
+## A small symbol for a trinket, skill, trait, consumable, card stamp or card material, drawn in code in the
 ## item's color. It's a texture, so it goes wherever one does: Button.icon, TextureRect.
 
-enum Kind { TRINKET, SKILL, CONSUMABLE, STAMP, MATERIAL }
+enum Kind { TRINKET, SKILL, TRAIT, CONSUMABLE, STAMP, MATERIAL }
 
 const SIZE := 18
 ## The symbols are drawn in a box this wide, centred on the origin, then scaled to fit.
@@ -11,7 +11,8 @@ const BOX := 24.0
 const ELLIPSE_POINTS := 20
 
 var kind: Kind
-## Items.Trinket, Items.Skill, Items.Consumable, CardSlot.Effect or Items.CardMaterial, depending on kind.
+## Items.Trinket, Items.Skill, Items.Trait, Items.Consumable, CardSlot.Effect or Items.CardMaterial, depending
+## on kind.
 var id: int
 var color: Color
 ## Width and height in pixels.
@@ -30,6 +31,15 @@ static func trinket(trinket_id: Items.Trinket, px := SIZE) -> ItemIcon:
 
 static func skill(skill_id: Items.Skill, px := SIZE) -> ItemIcon:
 	return _make(Kind.SKILL, skill_id, Items.SKILL_COLOR, px)
+
+
+static func trait_icon(trait_id: Items.Trait, px := SIZE) -> ItemIcon:
+	return _make(Kind.TRAIT, trait_id, Items.TRAIT_COLOR, px)
+
+
+## A skill's or trait's symbol.
+static func ability(ability_kind: Items.Ability, ability_id: int, px := SIZE) -> ItemIcon:
+	return skill(ability_id, px) if ability_kind == Items.Ability.SKILL else trait_icon(ability_id, px)
 
 
 static func consumable(consumable_id: Items.Consumable, px := SIZE) -> ItemIcon:
@@ -89,6 +99,8 @@ func _paint(to_canvas_item: RID, rect: Rect2, modulate: Color) -> void:
 			_draw_trinket(id, dark)
 		Kind.SKILL:
 			_draw_skill(id, dark)
+		Kind.TRAIT:
+			_draw_trait(id, dark)
 		Kind.CONSUMABLE:
 			_draw_consumable(id, dark)
 		Kind.STAMP:
@@ -178,23 +190,6 @@ func _draw_skill(skill_id: int, dark: Color) -> void:
 			_line([Vector2(-4, -4.5), Vector2(11.5, -4.5)], 2.2, color)
 			_line([Vector2(-11.5, 4.5), Vector2(3, 4.5)], 2.2, color)
 			_polygon([Vector2(8, 4.5), Vector2(2.5, 0.5), Vector2(2.5, 8.5)], color)
-		Items.Skill.THICK_FUR:
-			# A shield with a tuft of fur across it.
-			_polygon([Vector2(-8, -8), Vector2(0, -10.5), Vector2(8, -8), Vector2(8, -1), Vector2(5, 5),
-					Vector2(0, 10), Vector2(-5, 5), Vector2(-8, -1)], color)
-			_line([Vector2(-5, 0), Vector2(-2.5, -3.5), Vector2(0, 0), Vector2(2.5, -3.5), Vector2(5, 0)], 1.6, dark)
-		Items.Skill.HARD_HEAD:
-			# A wall, and a burst where something bonked it.
-			_rect(Rect2(6, -11, 4, 22), color)
-			for i in 5:
-				var d := Vector2.from_angle(PI / 2 + PI / 4 + i * PI / 8)
-				_line([Vector2(3, 0) + d * 4, Vector2(3, 0) + d * 10], 1.8, color)
-			_circle(Vector2(3, 0), 2.2, color)
-		Items.Skill.DAREDEVIL:
-			# A warning sign.
-			_polygon([Vector2(0, -10.5), Vector2(11, 9), Vector2(-11, 9)], color)
-			_line([Vector2(0, -3.5), Vector2(0, 3)], 2.2, dark)
-			_circle(Vector2(0, 6), 1.3, dark)
 		Items.Skill.SPRINT:
 			# Two chevrons racing right, with speed lines behind them.
 			for x: float in [-3.0, 4.5]:
@@ -208,7 +203,28 @@ func _draw_skill(skill_id: int, dark: Color) -> void:
 			_ellipse(Vector2(8.5, 1), Vector2(3, 2), 0.0, color.lightened(0.3))
 			_polygon([Vector2(-11, 1), Vector2(-8, -1.5), Vector2(-5, 1)], color.lightened(0.3))
 			_line([Vector2(-12, 2.5), Vector2(12, 2.5)], 1.2, dark)
-		Items.Skill.NINE_LIVES:
+
+
+func _draw_trait(trait_id: int, dark: Color) -> void:
+	match trait_id:
+		Items.Trait.THICK_FUR:
+			# A shield with a tuft of fur across it.
+			_polygon([Vector2(-8, -8), Vector2(0, -10.5), Vector2(8, -8), Vector2(8, -1), Vector2(5, 5),
+					Vector2(0, 10), Vector2(-5, 5), Vector2(-8, -1)], color)
+			_line([Vector2(-5, 0), Vector2(-2.5, -3.5), Vector2(0, 0), Vector2(2.5, -3.5), Vector2(5, 0)], 1.6, dark)
+		Items.Trait.HARD_HEAD:
+			# A wall, and a burst where something bonked it.
+			_rect(Rect2(6, -11, 4, 22), color)
+			for i in 5:
+				var d := Vector2.from_angle(PI / 2 + PI / 4 + i * PI / 8)
+				_line([Vector2(3, 0) + d * 4, Vector2(3, 0) + d * 10], 1.8, color)
+			_circle(Vector2(3, 0), 2.2, color)
+		Items.Trait.DAREDEVIL:
+			# A warning sign.
+			_polygon([Vector2(0, -10.5), Vector2(11, 9), Vector2(-11, 9)], color)
+			_line([Vector2(0, -3.5), Vector2(0, 3)], 2.2, dark)
+			_circle(Vector2(0, 6), 1.3, dark)
+		Items.Trait.NINE_LIVES:
 			# A heart, ringed by an arrow coming back round to its start.
 			var ring := _arc(Vector2(0, 0), 10.5, -PI * 0.35, PI * 1.45, 18)
 			_line(ring, 1.6, color)
@@ -217,14 +233,14 @@ func _draw_skill(skill_id: int, dark: Color) -> void:
 			_circle(Vector2(-2.6, -2), 3.3, color)
 			_circle(Vector2(2.6, -2), 3.3, color)
 			_polygon([Vector2(-5.8, -1), Vector2(5.8, -1), Vector2(0, 6.5)], color)
-		Items.Skill.KEEN_WHISKERS:
+		Items.Trait.KEEN_WHISKERS:
 			# A mouse's nose, with whiskers fanning out each side.
 			_ellipse(Vector2(0, 2), Vector2(5, 4), 0.0, color.lightened(0.35))
 			_circle(Vector2(0, -0.5), 2.4, color)
 			for side: float in [-1.0, 1.0]:
 				for y: float in [-4.5, 0.0, 4.5]:
 					_line([Vector2(3.5 * side, 1), Vector2(11.5 * side, y)], 1.2, color)
-		Items.Skill.PACK_RAT:
+		Items.Trait.PACK_RAT:
 			# A fan of three cards, held on to.
 			for i in 3:
 				var angle := (i - 1) * 0.35
@@ -233,7 +249,7 @@ func _draw_skill(skill_id: int, dark: Color) -> void:
 					func(p: Vector2) -> Vector2: return c + p.rotated(angle))
 				_polygon(card, color.lightened(0.15 * i))
 				_line(card + [card[0]], 1, dark)
-		Items.Skill.SHOW_OFF:
+		Items.Trait.SHOW_OFF:
 			# A big star with sparkles round it.
 			_star(Vector2(0, 1), 9, color)
 			_star(Vector2(-9, -8), 3, color.lightened(0.3))
